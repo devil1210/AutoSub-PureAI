@@ -1,0 +1,28 @@
+﻿# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# Environment variables & secrets
+.env
+*.local.json
+
+# Logs & temp files
+*.log
+*.tmp
+*.temp
+*_temp.*
+*_ctx_raw.*
+
+# Local data & runtimes
+venv/
+.venv/
+env/
+.vscode/
+.idea/
+.DS_Store
+
+# Persistence defaults (if run locally)
+autosub_config.json
+autosub_queue.json
+autosub_history.json

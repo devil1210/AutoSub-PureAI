@@ -1,0 +1,5 @@
+﻿# AutoSub PureAI Dependencies
+# Note: Core translation and web server use the Python Standard Library (3.10+).
+# External system requirement: mkvtoolnix (mkvmerge, mkvextract)
+
+requests>=2.31.0
