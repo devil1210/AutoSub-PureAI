@@ -1,4 +1,4 @@
-﻿# AutoSub PureAI 🎬✨
+# AutoSub PureAI 🎬✨
 > **Traductor Inteligente de Subtítulos con Contexto Narrativo y Panel de Control Web v3.5**  
 > *Diseñado para servidores multimedia modernos (Plex, Jellyfin, Emby).*
 
@@ -19,19 +19,19 @@ A diferencia de los traductores automáticos convencionales que traducen líneas
 ## 🚀 Características Principales
 
 * **🌐 Soporte para 10 Idiomas de Destino**:
-  - 🇲🇽 s-419: Español Latinoamericano neutro (.es-419.ass / .es-419.srt)
-  - 🇪🇸 s: Español de España / Castellano (.es.ass / .es.srt)
-  - 🇬🇧 n: English (.en.ass / .en.srt)
-  - 🇫🇷 r: Français (.fr.ass / .fr.srt)
-  - 🇩🇪 de: Deutsch (.de.ass / .de.srt)
-  - 🇧🇷 pt-BR: Português do Brasil (.pt-br.ass / .pt-br.srt)
-  - 🇮🇹 it: Italiano (.it.ass / .it.srt)
-  - 🇯🇵 ja: 日本語 (.ja.ass / .ja.srt)
-  - 🇷🇺 u: Русский (.ru.ass / .ru.srt)
-  - 🇨🇳 zh-CN: 简体中文 (.zh.ass / .zh.srt)
+  - 🇲🇽 **es-419**: Español Latinoamericano neutro (`.es-419.ass` / `.es-419.srt`)
+  - 🇪🇸 **es**: Español de España / Castellano (`.es.ass` / `.es.srt`)
+  - 🇬🇧 **en**: English (`.en.ass` / `.en.srt`)
+  - 🇫🇷 **fr**: Français (`.fr.ass` / `.fr.srt`)
+  - 🇩🇪 **de**: Deutsch (`.de.ass` / `.de.srt`)
+  - 🇧🇷 **pt-BR**: Português do Brasil (`.pt-br.ass` / `.pt-br.srt`)
+  - 🇮🇹 **it**: Italiano (`.it.ass` / `.it.srt`)
+  - 🇯🇵 **ja**: 日本語 (`.ja.ass` / `.ja.srt`)
+  - 🇷🇺 **ru**: Русский (`.ru.ass` / `.ru.srt`)
+  - 🇨🇳 **zh-CN**: 简体中文 (`.zh.ass` / `.zh.srt`)
 
 * **🎯 Selección Prioritaria de Pistas Fuente (MKV)**:
-  - Extrae automáticamente la pista de mejor calidad según tu orden de preferencia configurable (ej: 1° Japonés ja, 2° Inglés n, 3° Francés r...).
+  - Extrae automáticamente la pista de mejor calidad según tu orden de preferencia configurable (ej: 1° Japonés `ja`, 2° Inglés `en`, 3° Francés `fr`...).
 
 * **🛡️ Protección Adaptativa de Cuota (Adaptive Batching)**:
   - Si encolas múltiples idiomas simultáneamente, el sistema reduce dinámicamente el tamaño de los lotes y añade pausas de espaciado para proteger los límites de peticiones por minuto (RPM/TPM) de tu clave de API.
@@ -40,9 +40,9 @@ A diferencia de los traductores automáticos convencionales que traducen líneas
   - Organiza tus rutas fácilmente desde la interfaz web (ej: Anime, Películas, Doramas) para clasificar tu catálogo en un solo clic.
 
 * **⚡ Arquitectura Multinivel de Modelos de IA**:
-  - **Primario**: gemini-3.5-flash-lite (Google AI Studio, ultra veloz ~2.6s por lote).
-  - **Secundario**: gemini-3.1-flash-lite y gemma-4-31b-it (14,400 peticiones diarias).
-  - **Local Offline**: GPU local mediante Ollama (qwen3.5:9b, qwen3:14b, etc. con detección automática de estado).
+  - **Primario**: `gemini-3.5-flash-lite` (Google AI Studio, ultra veloz ~2.6s por lote).
+  - **Secundario**: `gemini-3.1-flash-lite` y `gemma-4-31b-it` (14,400 peticiones diarias).
+  - **Local Offline**: GPU local mediante Ollama (`qwen3.5:9b`, `qwen3:14b`, etc. con detección automática de estado).
   - **Opcional**: Fallback a OpenRouter.
 
 * **🖥️ Panel de Control Web Completo (Puerto 5055)**:
@@ -56,8 +56,8 @@ A diferencia de los traductores automáticos convencionales que traducen líneas
 ## 🛠️ Requisitos del Sistema
 
 - **Python 3.10+** (utiliza principalmente la librería estándar).
-- **MKVToolNix** (mkvmerge y mkvextract instalados en el sistema).
-  - En Debian/Ubuntu: pt install mkvtoolnix
+- **MKVToolNix** (`mkvmerge` y `mkvextract` instalados en el sistema).
+  - En Debian/Ubuntu: `sudo apt install mkvtoolnix`
   - En Windows: Añadir la carpeta de MKVToolNix al PATH.
 - (Opcional) Clave de API de Google Gemini (nivel gratuito o de pago) y/o Ollama local.
 
@@ -66,24 +66,24 @@ A diferencia de los traductores automáticos convencionales que traducen líneas
 ## 📦 Instalación Rápida
 
 1. **Clonar el repositorio**:
-   `ash
+   ```bash
    git clone https://github.com/devil1210/AutoSub-PureAI.git
    cd AutoSub-PureAI
-   `
+   ```
 
 2. **Configurar variables de entorno**:
-   `ash
+   ```bash
    cp .env.example .env
    # Edita .env con tus claves o configúralas directamente desde la interfaz web
-   `
+   ```
 
 3. **Iniciar el servidor**:
-   `ash
+   ```bash
    python autosub.py
-   `
+   ```
 
 4. **Acceder a la Web**:
-   Abre tu navegador en: http://localhost:5055/
+   Abre tu navegador en: [http://localhost:5055/](http://localhost:5055/)
 
 ---
 
@@ -101,4 +101,4 @@ Desde la pestaña **Configuración** podrás gestionar:
 
 ## 📄 Licencia
 
-Distribuido bajo la Licencia MIT. Consulta el archivo LICENSE para más detalles.
+Distribuido bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
