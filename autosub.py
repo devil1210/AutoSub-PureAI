@@ -302,6 +302,39 @@ def get_retry_delay_from_error(err_body):
         pass
     return None
 
+# === Control Proactivo de Frecuencia (Rate Limiter: Máx 10 RPM) ===
+MAX_GEMINI_RPM = 10  # Límite gratuito es 15 RPM. Establecemos 10 RPM como tope seguro (67% de uso).
+MIN_GEMINI_INTERVAL = 4.0  # Espaciado mínimo de 4.0s entre llamadas consecutivas a Gemini
+gemini_request_timestamps = []
+gemini_rate_lock = threading.Lock()
+
+def wait_for_gemini_slot():
+    """Garantiza que nunca se superen 10 RPM en ninguna ventana móvil de 60 segundos."""
+    with gemini_rate_lock:
+        now = time.time()
+        # Limpiar llamadas de hace más de 60s
+        while gemini_request_timestamps and now - gemini_request_timestamps[0] >= 60.0:
+            gemini_request_timestamps.pop(0)
+
+        # Si alcanzamos 10 peticiones en los últimos 60 segundos, dormir hasta que se libere un slot
+        if len(gemini_request_timestamps) >= MAX_GEMINI_RPM:
+            wait_time = 60.0 - (now - gemini_request_timestamps[0]) + 0.5
+            if wait_time > 0:
+                print(f"[Gemini RateLimiter] 🛡️ Protección de Cuota: alcanzadas {len(gemini_request_timestamps)}/{MAX_GEMINI_RPM} RPM. Pausando {wait_time:.1f}s para no saturar el límite...", flush=True)
+                time.sleep(wait_time)
+                now = time.time()
+                while gemini_request_timestamps and now - gemini_request_timestamps[0] >= 60.0:
+                    gemini_request_timestamps.pop(0)
+
+        # Espaciado mínimo entre llamadas para evitar ráfagas instantáneas
+        if gemini_request_timestamps:
+            elapsed = now - gemini_request_timestamps[-1]
+            if elapsed < MIN_GEMINI_INTERVAL:
+                time.sleep(MIN_GEMINI_INTERVAL - elapsed)
+                now = time.time()
+
+        gemini_request_timestamps.append(now)
+
 def clean_think_tags(text):
     if not text:
         return ""
@@ -387,8 +420,16 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
     if not api_key:
         return None
     with next_gemini_lock:
-        if time.time() < next_gemini_allowed:
-            return None
+        remaining = next_gemini_allowed - time.time()
+        if remaining > 0:
+            if remaining <= 75:
+                print(f"[Gemini Cooldown] Esperando cooldown de {remaining:.1f}s...", flush=True)
+                time.sleep(remaining + 0.5)
+            else:
+                return None
+
+    # Control proactivo de frecuencia: máximo 10 peticiones por minuto
+    wait_for_gemini_slot()
 
     preferred = app_config.get("cloud_model", GEMINI_MODELS[0])
     ordered = [preferred] + [m for m in GEMINI_MODELS if m != preferred]
@@ -884,7 +925,7 @@ REGLAS ESTRICTAS:
             return [parsed_results.get(i, text_list[i]) for i in range(len(text_list))]
     return None
 
-def proofread_subtitles(raw_texts, translated_texts, profile_data, batch_size=50, episode_context=None, target_lang="es-419"):
+def proofread_subtitles(raw_texts, translated_texts, profile_data, batch_size=100, episode_context=None, target_lang="es-419"):
     if not translated_texts or len(raw_texts) != len(translated_texts):
         return translated_texts
 
@@ -1349,7 +1390,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
                 if app_config.get("proofread", True):
                     print(f"[AutoSub] Realizando revisión final y pulido para {lang_name} ({len(translated_texts)} líneas)...", flush=True)
-                    translated_texts = proofread_subtitles(raw_texts, translated_texts, profile_data, episode_context=ep_context, target_lang=target_lang)
+                    translated_texts = proofread_subtitles(raw_texts, translated_texts, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
 
                 new_lines = list(lines)
                 for idx_dialogue, real_line_idx in enumerate(dialogue_indices):
@@ -1469,7 +1510,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
                 if app_config.get("proofread", True):
                     print(f"[AutoSub] Realizando revisión final y pulido para {lang_name} ({len(translated)} líneas)...", flush=True)
-                    translated = proofread_subtitles(all_texts, translated, profile_data, episode_context=ep_context, target_lang=target_lang)
+                    translated = proofread_subtitles(all_texts, translated, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
 
                 with open(out_srt, "w", encoding="utf-8") as f:
                     for idx, c in enumerate(cues):
