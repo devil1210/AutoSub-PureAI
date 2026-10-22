@@ -938,10 +938,11 @@ Tu tarea es revisar las líneas traducidas ({target_meta['ext'].upper()}) compar
 
 REGLAS CRÍTICAS E INQUEBRANTABLES:
 1. NUNCA AGREGUES NI ELIMINES LÍNEAS. Debe haber exactamente una línea de salida por cada línea de entrada.
-2. Devuelve las líneas con su numeración exacta en formato: [N] Texto
-3. Si una línea ya está bien traducida y no tiene errores ni alucinaciones, DEVUÉLVELA EXACTAMENTE IGUAL. No hagas cambios de estilo subjetivos ni reescribas frases que ya están bien.
-4. Mantén TODAS las etiquetas ASS entre llaves (ej. {{\\i1}}, {{\\pos(x,y)}}) y saltos \\N intactos en la misma posición.
-5. NO incluyas notas, comentarios, explicaciones ni texto adicional antes o después."""
+2. Devuelve las líneas con su numeración exacta en formato: [N] Texto en {prompt_lang}
+3. IMPORTANTE: NUNCA incluyas prefijos como 'EN:', 'Original:', 'Traducción:', 'ES:' ni el diálogo original en tu respuesta. Tu salida debe contener ÚNICAMENTE el texto final traducido al {prompt_lang}.
+4. Si una línea ya está bien traducida y no tiene errores ni alucinaciones, DEVUELVE ÚNICAMENTE LA TRADUCCIÓN TAL CUAL: [N] Texto traducido.
+5. Mantén TODAS las etiquetas ASS entre llaves (ej. {{\\i1}}, {{\\pos(x,y)}}) y saltos \\N intactos en la misma posición.
+6. NO incluyas notas, comentarios, explicaciones ni texto adicional antes o después."""
 
     corrected_texts = list(translated_texts)
 
@@ -952,10 +953,10 @@ REGLAS CRÍTICAS E INQUEBRANTABLES:
         numbered_items = []
         for idx_in_batch, (orig_line, tr_line) in enumerate(zip(batch_raw, batch_trans)):
             item_num = idx_in_batch + 1
-            clean_en = re.sub(r"\{.*?\}", "", orig_line).replace("\\N", " ").replace("\\n", " ").strip()
-            numbered_items.append(f"[{item_num}] EN: {clean_en} | ES: {tr_line}")
+            clean_orig = re.sub(r"\{.*?\}", "", orig_line).replace("\\N", " ").replace("\\n", " ").strip()
+            numbered_items.append(f"[{item_num}] Original: {clean_orig} => Traduccion: {tr_line}")
 
-        user_prompt = f"Revisa y pule estas líneas respetando la numeración exacta [1] a [{len(batch_raw)}]. NO agregues ni quites líneas:\n" + "\n".join(numbered_items) + "\n/no_think"
+        user_prompt = f"Revisa y pule estas líneas. Devuelve ÚNICAMENTE la traducción final en {prompt_lang} sin prefijos en formato [1] a [{len(batch_raw)}]:\n" + "\n".join(numbered_items) + "\n/no_think"
 
         resp = call_ai(user_prompt, system_instruction=sys_prompt, timeout=120)
         if not resp:
@@ -967,6 +968,9 @@ REGLAS CRÍTICAS E INQUEBRANTABLES:
             if m:
                 num = int(m.group(1)) - 1
                 val = m.group(2).strip()
+                # Limpiar cualquier eco accidental de etiquetas o prefijos de formato (ej: "EN: ... | ES: ...", "Original: ... => Traduccion: ...")
+                val = re.sub(r"^.*?(?:\||=>)\s*(?:[A-Za-z0-9\-]+|Traducci[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
+                val = re.sub(r"^(?:[A-Za-z0-9\-]+|Traducci[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
                 if 0 <= num < len(batch_raw) and val:
                     parsed_corrections[num] = val
 
