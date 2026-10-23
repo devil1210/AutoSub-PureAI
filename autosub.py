@@ -560,10 +560,13 @@ def get_or_create_series_profile(series_name, force_refresh=False):
     clean_name = re.sub(r'[\\/*?:"<>|]', "", series_name).strip()
     profile_path = os.path.join(PROFILES_DIR, f"{clean_name}.json")
 
-    if not force_refresh and os.path.exists(profile_path):
+    existing_profile = None
+    if os.path.exists(profile_path):
         try:
             with open(profile_path, "r", encoding="utf-8") as f:
-                return json.load(f), profile_path
+                existing_profile = json.load(f)
+                if not force_refresh:
+                    return existing_profile, profile_path
         except Exception as e:
             print(f"[Profile] Error leyendo perfil existente: {e}", flush=True)
 
@@ -626,6 +629,28 @@ Devuelve ÚNICAMENTE el bloque JSON.
             {"name": c["name"], "gender": "Desconocido", "personality": f"Rol en la serie: {c['role']}"}
             for c in web_info["characters_raw"]
         ]
+
+    # Preservar glosario personalizado y episodios si ya existía un perfil previo
+    if existing_profile and isinstance(existing_profile, dict):
+        old_glossary = existing_profile.get("glossary", {})
+        if old_glossary and isinstance(old_glossary, dict):
+            merged_glossary = dict(profile_data.get("glossary", {}))
+            merged_glossary.update(old_glossary)
+            profile_data["glossary"] = merged_glossary
+
+        old_eps = existing_profile.get("episodes", [])
+        if old_eps and not profile_data.get("episodes"):
+            profile_data["episodes"] = old_eps
+
+        old_chars_map = {c.get("name", "").strip().lower(): c for c in existing_profile.get("characters", []) if c.get("name")}
+        for c in profile_data.get("characters", []):
+            k_name = c.get("name", "").strip().lower()
+            if k_name in old_chars_map:
+                old_c = old_chars_map[k_name]
+                if old_c.get("personality"):
+                    c["personality"] = old_c["personality"]
+                if old_c.get("gender") and old_c.get("gender") != "Desconocido":
+                    c["gender"] = old_c["gender"]
 
     try:
         os.makedirs(PROFILES_DIR, exist_ok=True)
