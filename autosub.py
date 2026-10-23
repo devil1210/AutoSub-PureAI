@@ -1000,13 +1000,13 @@ Tu tarea es revisar las líneas traducidas ({target_meta['ext'].upper()}) compar
 2. Palabras residuales del idioma de origen que debieron traducirse al {prompt_lang}.
 3. Errores ortográficos o de concordancia de género según el personaje que habla.
 4. Asegurar que los términos del GLOSARIO OBLIGATORIO se respeten.
-5. Saltos de línea (\\N): Revisa minuciosamente las líneas con saltos \\N. Corrige palabras que hayan perdido su letra 'n'/'N' inicial (ejemplo: si el modelo escribió '\\No puedo' en vez de '\\N No puedo').
+5. Palabras mutiladas o letras comidas tras saltos \\N o etiquetas: Compara cada término clave con el original en inglés. Es un error crítico de tokenización que una palabra pierda su primera consonante al estar pegada a \\N (ejemplos reales: 'seasoned' traducido erróneamente como '\\Nazonada' -> DEBES RESTAURARLO como '\\Nsazonada'; 'can\\'t' traducido como '\\No puedo' -> DEBE SER '\\N No puedo'; '\\Nervida' -> '\\Nservida'; '\\Nuvia' -> '\\Nlluvia'). Si ves una palabra tras \\N a la que le falta una letra para concordar con el sentido del diálogo original, RESTAURA la palabra completa de inmediato.
 
 REGLAS CRÍTICAS E INQUEBRANTABLES:
 1. NUNCA AGREGUES NI ELIMINES LÍNEAS. Debe haber exactamente una línea de salida por cada línea de entrada.
 2. Devuelve las líneas con su numeración exacta en formato: [N] Texto en {prompt_lang}
 3. IMPORTANTE: NUNCA incluyas prefijos como 'EN:', 'Original:', 'Traducción:', 'ES:' ni el diálogo original en tu respuesta. Tu salida debe contener ÚNICAMENTE el texto final traducido al {prompt_lang}.
-4. Si una línea ya está bien traducida y no tiene errores ni alucinaciones, DEVUELVE ÚNICAMENTE LA TRADUCCIÓN TAL CUAL: [N] Texto traducido.
+4. Si una línea ya está bien traducida y no tiene errores ni alucinaciones, DEVUELVE ÚNICAMENTE LA TRADUCCIÓN TAL CUAL: [N] Texto traducido. NOTA: Corregir palabras mutiladas, letras faltantes o términos de glosario NO se considera un cambio subjetivo de estilo; es una corrección OBLIGATORIA.
 5. Mantén TODAS las etiquetas ASS entre llaves (ej. {{\\i1}}, {{\\pos(x,y)}}) y saltos \\N intactos en la misma posición.
 6. NO incluyas notas, comentarios, explicaciones ni texto adicional antes o después."""
 
@@ -1157,9 +1157,21 @@ def process_file(video_path, force=False, context_only=False, target_languages=N
             current_total_batches = 0
     return success
 
+def sanitize_subtitle_text(text):
+    if not text:
+        return ""
+    # Corregir palabras mutiladas comunes tras saltos \N o etiquetas de control
+    # 1. 'azonada' -> 'sazonada'
+    text = re.sub(r'\\N\s*azonad([a-zñáéíóú]*)', r'\\Nsazonad\1', text, flags=re.IGNORECASE)
+    # 2. '\No puedo', '\No es', '\No hay', etc. (donde el salto \N se comió el espacio de 'No')
+    text = re.sub(r'\\No\s+(pued|sé|se\b|te\b|me\b|le\b|lo\b|la\b|los\b|las\b|nos\b|es\b|son\b|era\b|hay\b|teng|tien|quier|voy|vas|va|vam|van|import|pas|deb|est|hag|dig|cre|val|qued|tem|olvid)', r'\\N No \1', text, flags=re.IGNORECASE)
+    # 3. '\No' pegado sin espacio a verbos de negación
+    text = re.sub(r'\\No(puedo|pude|podemos|podrá|sabía|sé|tengo|tiene|tenemos|quiero|quiere|queremos|voy|vamos|importa|pasa|debo|debe|debemos|estoy|está|estamos|hago|hace|hacemos|digo|dice|creo|queda|temas)', r'\\N No \1', text, flags=re.IGNORECASE)
+    return text
+
 def format_srt_text(raw_text):
-    clean = re.sub(r'\{.*?\}', '', raw_text.strip())
-    clean = re.sub(r'\\No\s+(pued|sé|se\b|te\b|me\b|le\b|lo\b|la\b|los\b|las\b|nos\b|es\b|son\b|era\b|hay\b|teng|tien|quier|voy|vas|va|vam|van|import|pas|deb|est|hag|dig|cre|val|qued|tem|olvid)', r'\nNo \1', clean, flags=re.IGNORECASE)
+    clean = sanitize_subtitle_text(raw_text.strip())
+    clean = re.sub(r'\{.*?\}', '', clean)
     clean = clean.replace('\\N', '\n').replace('\\n', '\n').strip()
     return clean
 
@@ -1422,7 +1434,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     if idx_dialogue < len(translated_texts):
                         parts = new_lines[real_line_idx].split(",", 9)
                         if len(parts) == 10:
-                            new_lines[real_line_idx] = ",".join(parts[:9]) + "," + translated_texts[idx_dialogue] + "\n"
+                            new_lines[real_line_idx] = ",".join(parts[:9]) + "," + sanitize_subtitle_text(translated_texts[idx_dialogue]) + "\n"
 
                 with open(out_ass, "w", encoding="utf-8") as f:
                     f.writelines(new_lines)
