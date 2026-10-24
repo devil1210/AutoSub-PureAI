@@ -1,5 +1,9 @@
-﻿# AutoSub PureAI Dependencies
-# Note: Core translation and web server use the Python Standard Library (3.10+).
-# External system requirement: mkvtoolnix (mkvmerge, mkvextract)
-
-requests>=2.31.0
+# AutoSub PureAI Dependencies
+# 100% Python Standard Library (Python 3.10+) - No external pip packages required.
+#
+# External system requirement:
+# - MKVToolNix (mkvmerge, mkvextract) must be installed and available in PATH.
+#   Debian/Ubuntu: apt-get install -y mkvtoolnix
+#   Alpine Linux:  apk add mkvtoolnix
+#   macOS:         brew install mkvtoolnix
+#   Windows:       choco install mkvtoolnix-gui (or add to PATH)

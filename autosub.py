@@ -4,7 +4,9 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -12,13 +14,46 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PORT = 5055
+# === Carga Nativa de Variables de Entorno (.env) ===
+def _load_env_file():
+    for env_path in [os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), ".env"]:
+        if os.path.isfile(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+                break
+            except Exception:
+                pass
 
-# === Configuración y Persistencia ===
-CONFIG_FILE = "/opt/autosub_config.json"
-QUEUE_FILE = "/opt/autosub_queue.json"
-HISTORY_FILE = "/opt/autosub_history.json"
-PROFILES_DIR = "/data/tvshows/.profiles"
+_load_env_file()
+
+def check_mkvtoolnix():
+    mkvmerge_bin = shutil.which("mkvmerge")
+    mkvextract_bin = shutil.which("mkvextract")
+    return bool(mkvmerge_bin and mkvextract_bin), mkvmerge_bin, mkvextract_bin
+
+PORT = int(os.getenv("PORT", 5055))
+
+# === Configuración y Persistencia (Portable en Linux, Windows y Docker) ===
+_default_data_dir = "/opt" if (os.path.isdir("/opt") and os.access("/opt", os.W_OK)) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DATA_DIR = os.getenv("AUTOSUB_DATA_DIR", _default_data_dir)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+CONFIG_FILE = os.path.join(DATA_DIR, "autosub_config.json")
+QUEUE_FILE = os.path.join(DATA_DIR, "autosub_queue.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "autosub_history.json")
+
+_default_profiles = "/data/tvshows/.profiles" if os.path.isdir("/data/tvshows") else os.path.join(DATA_DIR, "profiles")
+PROFILES_DIR = os.getenv("AUTOSUB_PROFILES_DIR", _default_profiles)
+os.makedirs(PROFILES_DIR, exist_ok=True)
 
 DEFAULT_CONFIG = {
     "local_only": False,
@@ -1080,7 +1115,9 @@ def format_duration(seconds):
     s = int(seconds % 60)
     return f"{m}m {s:02d}s"
 
-def enqueue_retry(video_path, force, series_name, error_reason="", increment_attempt=True):
+MAX_RETRY_ATTEMPTS = 5
+
+def enqueue_retry(video_path, force, series_name, error_reason="", increment_attempt=True, context_only=False, target_languages=None):
     with queue_lock:
         if video_path not in retry_queue:
             retry_queue[video_path] = {
@@ -1089,13 +1126,25 @@ def enqueue_retry(video_path, force, series_name, error_reason="", increment_att
                 "series_name": series_name,
                 "attempts": 1 if increment_attempt else 0,
                 "last_error": error_reason,
+                "context_only": context_only,
+                "target_languages": target_languages,
                 "next_retry_at": time.time() + (60 if increment_attempt else 15)
             }
         else:
             if increment_attempt:
                 retry_queue[video_path]["attempts"] += 1
-            retry_queue[video_path]["last_error"] = error_reason
             att = retry_queue[video_path]["attempts"]
+            retry_queue[video_path]["last_error"] = error_reason
+            if context_only:
+                retry_queue[video_path]["context_only"] = context_only
+            if target_languages:
+                retry_queue[video_path]["target_languages"] = target_languages
+            if att > MAX_RETRY_ATTEMPTS:
+                print(f"[AutoSub] ⚠️ Archivo superó el máximo de {MAX_RETRY_ATTEMPTS} reintentos: {video_path} (Razón: {error_reason})", flush=True)
+                retry_queue[video_path]["status"] = "Descartado"
+                retry_queue[video_path]["next_retry_at"] = 0
+                save_persisted_queue()
+                return
             backoff = 15 if not increment_attempt else min(300, 30 * (2 ** min(att, 4)))
             retry_queue[video_path]["next_retry_at"] = time.time() + backoff
         save_persisted_queue()
@@ -1251,7 +1300,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                         pref_trk = sub_trks[0]
                     if pref_trk:
                         t_ext = ".ass" if "substation" in pref_trk.get("codec", "").lower() or "ass" in pref_trk.get("codec", "").lower() else ".srt"
-                        t_tmp = os.path.join(base_dir, f"{base_name}_ctx_raw{t_ext}")
+                        t_tmp = os.path.join(tempfile.gettempdir(), f"autosub_ctx_{int(time.time()*1000)}_{base_name}{t_ext}")
                         subprocess.run(["mkvextract", "tracks", video_path, f"{pref_trk['id']}:{t_tmp}"], check=True, capture_output=True)
                         if os.path.exists(t_tmp):
                             if t_ext == ".ass":
@@ -1283,7 +1332,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 return True
 
     if app_config.get("local_only", True) and not is_ollama_alive(timeout=1.2):
-        enqueue_retry(video_path, force, series_name, "PC apagada (esperando RTX 4070)", increment_attempt=False)
+        enqueue_retry(video_path, force, series_name, "PC apagada (esperando RTX 4070)", increment_attempt=False, context_only=context_only, target_languages=target_langs)
         return False
 
     if not force and not context_only:
@@ -1303,7 +1352,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
         proc = subprocess.run(["mkvmerge", "-J", video_path], capture_output=True, text=True, check=True)
         info = json.loads(proc.stdout)
     except Exception as e:
-        enqueue_retry(video_path, force, series_name, f"Error mkvmerge: {e}")
+        enqueue_retry(video_path, force, series_name, f"Error mkvmerge: {e}", context_only=context_only, target_languages=target_langs)
         return False
 
     tracks = info.get("tracks", [])
@@ -1330,12 +1379,12 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
     codec = selected_track.get("codec", "")
     is_ass = "substation" in codec.lower() or "ass" in codec.lower() or "ssa" in codec.lower()
     temp_ext = ".ass" if is_ass else ".srt"
-    temp_file = os.path.join(base_dir, f"{base_name}_temp{temp_ext}")
+    temp_file = os.path.join(tempfile.gettempdir(), f"autosub_raw_{int(time.time()*1000)}_{base_name}{temp_ext}")
 
     try:
         subprocess.run(["mkvextract", "tracks", video_path, f"{track_id}:{temp_file}"], check=True, capture_output=True)
         if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
-            enqueue_retry(video_path, force, series_name, "Fallo al extraer subtítulo con mkvextract")
+            enqueue_retry(video_path, force, series_name, "Fallo al extraer subtítulo con mkvextract", context_only=context_only, target_languages=target_langs)
             return False
 
         profile_data, profile_path = get_or_create_series_profile(series_name)
@@ -1419,7 +1468,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     time.sleep(0.2)
 
                 if not translation_success:
-                    enqueue_retry(video_path, force, series_name, f"Error IA traduciendo lote ASS ({target_lang})")
+                    enqueue_retry(video_path, force, series_name, f"Error IA traduciendo lote ASS ({target_lang})", context_only=context_only, target_languages=target_langs)
                     continue
 
                 if ep_context is None:
@@ -1539,7 +1588,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     time.sleep(0.2)
 
                 if not translation_success:
-                    enqueue_retry(video_path, force, series_name, f"Error IA traduciendo lote SRT ({target_lang})")
+                    enqueue_retry(video_path, force, series_name, f"Error IA traduciendo lote SRT ({target_lang})", context_only=context_only, target_languages=target_langs)
                     continue
 
                 if ep_context is None:
@@ -1568,10 +1617,10 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 save_persisted_queue()
 
     except Exception as ex:
-        enqueue_retry(video_path, force, series_name, str(ex))
+        enqueue_retry(video_path, force, series_name, str(ex), context_only=context_only, target_languages=target_langs)
         return False
     finally:
-        if os.path.exists(temp_file):
+        if temp_file and os.path.exists(temp_file):
             try:
                 os.remove(temp_file)
             except OSError:
@@ -1604,15 +1653,21 @@ def retry_worker():
             due_items = []
             with queue_lock:
                 for path, item in list(retry_queue.items()):
-                    if now >= item.get("next_retry_at", 0):
-                        due_items.append((path, item.get("force", False)))
+                    next_t = item.get("next_retry_at", 0)
+                    if next_t > 0 and now >= next_t:
+                        due_items.append((
+                            path,
+                            item.get("force", False),
+                            item.get("context_only", False),
+                            item.get("target_languages")
+                        ))
 
-            for path, force in due_items:
+            for path, force, c_only, t_langs in due_items:
                 if app_config.get("local_only", True) and not is_ollama_alive(timeout=1.0):
                     break
                 in_job_q = any(path == item[0] for item in list(job_queue.queue))
                 if not in_job_q and currently_processing != os.path.basename(path):
-                    job_queue.put((path, force))
+                    job_queue.put((path, force, c_only, t_langs))
         except Exception as e:
             print(f"[Retry Worker Error] {e}", flush=True)
         time.sleep(5)
@@ -1658,10 +1713,16 @@ def build_status_dict():
         is_cancelling = cancel_current_flag
 
     history_list = load_history()
+    mkv_ok, mkvmerge_p, mkvextract_p = check_mkvtoolnix()
 
     return {
         "status": "online",
         "service": "AutoSub Pure AI v3.5",
+        "system": {
+            "mkvtoolnix_installed": mkv_ok,
+            "mkvmerge_path": mkvmerge_p,
+            "mkvextract_path": mkvextract_p
+        },
         "config": app_config,
         "pc_gpu": {
             "online": pc_online,
@@ -3263,8 +3324,9 @@ class AutoSubHandler(BaseHTTPRequestHandler):
         accept = self.headers.get("Accept", "")
         parsed = urllib.parse.urlparse(self.path)
         clean_path = parsed.path
+        is_json_api = clean_path.startswith("/api/") or "?format=json" in self.path
 
-        if clean_path == "/api/status" or "application/json" in accept or "?format=json" in self.path:
+        if clean_path == "/api/status" or ("application/json" in accept and is_json_api) or "?format=json" in self.path:
             status_data = build_status_dict()
             self.send_json(status_data)
             return
@@ -3569,6 +3631,11 @@ class AutoSubHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"=== AutoSub Pure AI v3.5 (Control Center + Historial + Editor Perfiles) - Puerto {PORT} ===", flush=True)
+    mkv_ok, mkvmerge_path, mkvextract_path = check_mkvtoolnix()
+    if mkv_ok:
+        print(f"[AutoSub] MKVToolNix detectado: mkvmerge={mkvmerge_path}, mkvextract={mkvextract_path}", flush=True)
+    else:
+        print("[AutoSub] ⚠️ ADVERTENCIA: mkvmerge o mkvextract no encontrados en PATH. La extracción de pistas fallará a menos que se instalen.", flush=True)
     threading.Thread(target=queue_worker, daemon=True).start()
     threading.Thread(target=retry_worker, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), AutoSubHandler)
