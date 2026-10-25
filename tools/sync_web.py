@@ -6,6 +6,7 @@ sync_web.py - Servidor Web UI para Sincronización Automática de Audio Latino
 Interfaz moderna inspirada en AutoSub para seleccionar series, capítulos de Nyaa
 e inyectar pistas de audio de Telegram con ajuste de desfase milimétrico.
 Compatible con Proxmox LXC (Alpine Linux) y Windows.
+Soporta subida directa de archivos desde el navegador del PC a Proxmox.
 """
 
 import os
@@ -55,7 +56,8 @@ DEFAULT_CONFIG = {
     "telegram_root_dir": DEFAULT_TELEGRAM,
     "trim_seconds": 360,
     "default_track": False,
-    "track_name": "Español Latino"
+    "track_name": "Español Latino",
+    "delete_after_mux": True
 }
 
 
@@ -77,58 +79,12 @@ def save_config(cfg):
         print(f"[!] Error guardando config: {e}")
 
 
-def open_file_dialog_windows(initial_dir=""):
-    """Abre el diálogo nativo de Windows si se ejecuta en Windows."""
-    if not IS_WINDOWS:
-        return ""
-    ps_script = f'''
-    Add-Type -AssemblyName System.Windows.Forms
-    $d = New-Object System.Windows.Forms.OpenFileDialog
-    $d.Filter = "Video y Audio (*.mp4;*.mkv;*.m4v;*.webm;*.aac;*.m4a)|*.mp4;*.mkv;*.m4v;*.webm;*.aac;*.m4a|Todos los archivos (*.*)|*.*"
-    $d.Title = "Seleccionar archivo de Telegram con doblaje latino"
-    $d.TopMost = $true
-    if ("{initial_dir}" -and (Test-Path "{initial_dir}")) {{ $d.InitialDirectory = "{initial_dir}" }}
-    if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
-        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-        Write-Output $d.FileName
-    }}
-    '''
-    try:
-        res = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps_script],
-                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-        return res.stdout.strip()
-    except Exception:
-        return ""
-
-
-def open_folder_dialog_windows(initial_dir=""):
-    """Abre el diálogo nativo de Windows para carpetas si se ejecuta en Windows."""
-    if not IS_WINDOWS:
-        return ""
-    ps_script = f'''
-    Add-Type -AssemblyName System.Windows.Forms
-    $d = New-Object System.Windows.Forms.FolderBrowserDialog
-    $d.Description = "Seleccionar carpeta raíz de series o anime"
-    if ("{initial_dir}" -and (Test-Path "{initial_dir}")) {{ $d.SelectedPath = "{initial_dir}" }}
-    if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
-        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-        Write-Output $d.SelectedPath
-    }}
-    '''
-    try:
-        res = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps_script],
-                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
-        return res.stdout.strip()
-    except Exception:
-        return ""
-
-
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoDub Studio | Sincronización Acústica Proxmox</title>
+  <title>AutoDub Studio Proxmox | Doblaje Latino Inteligente</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -155,7 +111,7 @@ HTML_PAGE = """<!DOCTYPE html>
       min-height: 100vh;
       padding: 24px;
     }
-    .container { max-width: 1300px; margin: 0 auto; }
+    .container { max-width: 1350px; margin: 0 auto; }
     
     header {
       display: flex;
@@ -201,12 +157,15 @@ HTML_PAGE = """<!DOCTYPE html>
       display: inline-flex; align-items: center; gap: 6px;
       padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
       border: none; cursor: pointer; transition: all 0.2s ease;
+      white-space: nowrap;
     }
     .btn-primary { background: linear-gradient(135deg, #0284c7, #38bdf8); color: white; }
     .btn-primary:hover { filter: brightness(1.15); transform: translateY(-1px); }
     .btn-secondary { background: rgba(255, 255, 255, 0.08); color: var(--text); border: 1px solid var(--border); }
     .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
     .btn-success { background: linear-gradient(135deg, #059669, #10b981); color: white; }
+    .btn-purple { background: linear-gradient(135deg, #7c3aed, #a855f7); color: white; }
+    .btn-purple:hover { filter: brightness(1.15); transform: translateY(-1px); }
     .btn-sm { padding: 6px 12px; font-size: 12px; }
 
     select, input[type="text"] {
@@ -236,10 +195,10 @@ HTML_PAGE = """<!DOCTYPE html>
     .badge-gray { background: rgba(148, 163, 184, 0.1); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.2); }
     .badge-purple { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
 
-    .dub-input-group { display: flex; gap: 6px; align-items: center; width: 100%; min-width: 340px; }
+    .dub-input-group { display: flex; gap: 6px; align-items: center; width: 100%; min-width: 380px; }
     .dub-input-group input { font-size: 12px; padding: 7px 10px; font-family: monospace; }
 
-    /* Modal / File Browser */
+    /* Modales */
     .modal-overlay {
       display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px);
@@ -251,10 +210,14 @@ HTML_PAGE = """<!DOCTYPE html>
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
     }
     .progress-bar-wrap {
-      width: 100%; height: 8px; background: #1e293b;
-      border-radius: 4px; overflow: hidden; margin: 16px 0;
+      width: 100%; height: 10px; background: #1e293b;
+      border-radius: 5px; overflow: hidden; margin: 16px 0;
     }
     .progress-bar-fill {
+      width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #a855f7);
+      transition: width 0.2s ease;
+    }
+    .progress-bar-indeterminate {
       width: 100%; height: 100%; background: linear-gradient(90deg, #38bdf8, #a855f7);
       animation: indeterminate 1.8s infinite linear;
       transform-origin: 0% 50%;
@@ -317,7 +280,7 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
       <div>
         <label style="font-size:12px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:6px;">
-          Carpeta de Descargas / Telegram (Audio Latino):
+          Carpeta de Descargas en Proxmox (Opcional):
         </label>
         <div style="display:flex; gap:8px;">
           <input type="text" id="cfg-dub-dir" placeholder="/data/downloads">
@@ -325,7 +288,11 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
       </div>
     </div>
-    <div style="margin-top:14px; text-align:right;">
+    <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center;">
+      <label style="font-size:12px; color:var(--text-muted); display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="cfg-delete-after" checked>
+        Limpiar archivo subido temporal de Telegram tras muxear con éxito
+      </label>
       <button class="btn btn-primary btn-sm" onclick="saveAndReload()">💾 Guardar y Cargar Catálogo</button>
     </div>
   </div>
@@ -347,7 +314,7 @@ HTML_PAGE = """<!DOCTYPE html>
             <th style="width:70px;">Cap</th>
             <th>Archivo de Nyaa (1080p)</th>
             <th style="width:230px;">Pistas Detectadas</th>
-            <th>Archivo con Audio Latino (Telegram / Descargas)</th>
+            <th>Archivo con Audio Latino (Telegram / PC)</th>
             <th style="width:140px; text-align:right;">Acción</th>
           </tr>
         </thead>
@@ -376,17 +343,17 @@ HTML_PAGE = """<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Modal: Progreso de Sincronización -->
+<!-- Modal: Progreso y Subida -->
 <div id="sync-modal" class="modal-overlay">
   <div class="modal-box">
     <h3 id="modal-title" style="margin-bottom:8px; font-size:18px;">⚡ Sincronizando Audio...</h3>
-    <p id="modal-desc" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Analizando correlación de audio FFT...</p>
+    <p id="modal-desc" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Iniciando proceso...</p>
     
     <div class="progress-bar-wrap">
-      <div class="progress-bar-fill"></div>
+      <div id="modal-progress-bar" class="progress-bar-indeterminate"></div>
     </div>
 
-    <div class="log-box" id="modal-logs">Iniciando proceso...</div>
+    <div class="log-box" id="modal-logs">Iniciando...</div>
 
     <div style="margin-top:18px; text-align:right;">
       <button class="btn btn-secondary btn-sm" id="modal-close-btn" style="display:none;" onclick="closeModal()">Cerrar</button>
@@ -410,15 +377,17 @@ async function loadConfig() {
   currentConfig = await res.json();
   document.getElementById('cfg-anime-dir').value = currentConfig.anime_root_dir || '/data/tvshows';
   document.getElementById('cfg-dub-dir').value = currentConfig.telegram_root_dir || '/data/downloads';
+  document.getElementById('cfg-delete-after').checked = currentConfig.delete_after_mux !== false;
 }
 
 async function saveAndReload() {
   const animeDir = document.getElementById('cfg-anime-dir').value.trim();
   const dubDir = document.getElementById('cfg-dub-dir').value.trim();
+  const delAfter = document.getElementById('cfg-delete-after').checked;
   await fetch('/api/config', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ anime_root_dir: animeDir, telegram_root_dir: dubDir })
+    body: JSON.stringify({ anime_root_dir: animeDir, telegram_root_dir: dubDir, delete_after_mux: delAfter })
   });
   await loadSeriesCatalog();
 }
@@ -505,8 +474,10 @@ function renderEpisodesTable() {
         </td>
         <td>
           <div class="dub-input-group">
-            <input type="text" id="dub-path-${idx}" placeholder="/data/downloads/archivo.mp4" value="${ep.suggested_dub || ''}">
-            <button class="btn btn-secondary btn-sm" onclick="pickDubFileForEp(${idx})">📁</button>
+            <input type="text" id="dub-path-${idx}" placeholder="Ruta en Proxmox o sube desde tu PC..." value="${ep.suggested_dub || ''}">
+            <button class="btn btn-secondary btn-sm" onclick="pickDubFileForEp(${idx})" title="Explorar en disco de Proxmox">📁 Servidor</button>
+            <button class="btn btn-purple btn-sm" onclick="triggerPcUpload(${idx})" title="Subir archivo descargado en tu PC de Telegram">⬆️ Subir de mi PC</button>
+            <input type="file" id="file-input-${idx}" style="display:none;" onchange="handlePcFileSelected(${idx})" accept="video/*,audio/*,.mkv,.mp4,.m4v,.webm,.aac,.m4a">
           </div>
         </td>
         <td style="text-align:right;">
@@ -517,6 +488,78 @@ function renderEpisodesTable() {
       </tr>
     `;
   }).join('');
+}
+
+// Disparar selector de archivos de Windows/PC
+function triggerPcUpload(idx) {
+  const fileInput = document.getElementById(`file-input-${idx}`);
+  fileInput.click();
+}
+
+async function handlePcFileSelected(idx) {
+  const fileInput = document.getElementById(`file-input-${idx}`);
+  if (!fileInput.files || fileInput.files.length === 0) return;
+  const file = fileInput.files[0];
+  const ep = currentEpisodes[idx];
+
+  const modal = document.getElementById('sync-modal');
+  const pBar = document.getElementById('modal-progress-bar');
+  const logs = document.getElementById('modal-logs');
+  const title = document.getElementById('modal-title');
+  const desc = document.getElementById('modal-desc');
+  const closeBtn = document.getElementById('modal-close-btn');
+
+  modal.style.display = 'flex';
+  closeBtn.style.display = 'none';
+  pBar.className = 'progress-bar-fill';
+  pBar.style.width = '0%';
+  title.innerText = `⬆️ Subiendo ${file.name} a Proxmox`;
+  desc.innerText = `Subiendo archivo desde tu PC (${(file.size / (1024*1024)).toFixed(1)} MB)...`;
+  logs.innerText = `Iniciando transferencia local PC -> Proxmox...\n`;
+
+  // Subir vía XMLHttpRequest con barra de progreso
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/api/upload?filename=${encodeURIComponent(file.name)}`, true);
+
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      pBar.style.width = pct + '%';
+      const loadedMB = (e.loaded / (1024*1024)).toFixed(1);
+      const totalMB = (e.total / (1024*1024)).toFixed(1);
+      desc.innerText = `Subiendo: ${pct}% (${loadedMB} / ${totalMB} MB)`;
+    }
+  };
+
+  xhr.onload = async () => {
+    if (xhr.status === 200) {
+      const data = JSON.parse(xhr.responseText);
+      const uploadedPath = data.path;
+      document.getElementById(`dub-path-${idx}`).value = uploadedPath;
+
+      pBar.className = 'progress-bar-indeterminate';
+      pBar.style.width = '100%';
+      title.innerText = `⚡ Sincronizando Audio en Proxmox...`;
+      desc.innerText = `Calculando desfase acústico de ${file.name}...`;
+      logs.innerText += `[OK] Subida completada en ${uploadedPath}\nIniciando correlación FFT...\n`;
+
+      // Proceder de inmediato a la sincronización
+      await executeSync(ep, uploadedPath, data.is_uploaded);
+    } else {
+      title.innerText = '❌ Error al Subir Archivo';
+      desc.innerText = 'No se pudo transferir el archivo a Proxmox.';
+      logs.innerText += `\n[ERROR] Código HTTP ${xhr.status}: ${xhr.responseText}\n`;
+      closeBtn.style.display = 'inline-block';
+    }
+  };
+
+  xhr.onerror = () => {
+    title.innerText = '❌ Error de Conexión';
+    desc.innerText = 'Fallo en la conexión de red local con Proxmox.';
+    closeBtn.style.display = 'inline-block';
+  };
+
+  xhr.send(file);
 }
 
 // Explorador de archivos del servidor Proxmox
@@ -532,7 +575,7 @@ function openFsBrowser(type) {
 function pickDubFileForEp(idx) {
   fsTargetInput = `dub-path-${idx}`;
   document.getElementById('fs-select-dir-btn').style.display = 'none';
-  document.getElementById('fs-modal-title').innerText = '🎵 Seleccionar Archivo de Doblaje Latino';
+  document.getElementById('fs-modal-title').innerText = '🎵 Seleccionar Archivo de Doblaje en Proxmox';
   const startPath = document.getElementById('cfg-dub-dir').value.trim() || '/data/downloads';
   loadFsPath(startPath);
   document.getElementById('fs-modal').style.display = 'flex';
@@ -602,11 +645,12 @@ async function startSyncJob(idx) {
   const dubPath = dubInput.value.trim();
 
   if (!dubPath) {
-    alert('Por favor selecciona o escribe la ruta del archivo con audio en español.');
+    alert('Por favor escribe la ruta o pulsa "⬆️ Subir de mi PC" para cargar el archivo descargado.');
     return;
   }
 
   const modal = document.getElementById('sync-modal');
+  const pBar = document.getElementById('modal-progress-bar');
   const logs = document.getElementById('modal-logs');
   const title = document.getElementById('modal-title');
   const desc = document.getElementById('modal-desc');
@@ -614,9 +658,21 @@ async function startSyncJob(idx) {
 
   modal.style.display = 'flex';
   closeBtn.style.display = 'none';
+  pBar.className = 'progress-bar-indeterminate';
   title.innerText = `⚡ Sincronizando ${ep.name}`;
   desc.innerText = 'Calculando correlación acústica en Proxmox con FFmpeg y mkvmerge...';
   logs.innerText = `Iniciando proceso...\nBase: ${ep.name}\nDoblaje: ${dubPath}\n`;
+
+  await executeSync(ep, dubPath, false);
+}
+
+async function executeSync(ep, dubPath, isUploaded) {
+  const modal = document.getElementById('sync-modal');
+  const logs = document.getElementById('modal-logs');
+  const title = document.getElementById('modal-title');
+  const desc = document.getElementById('modal-desc');
+  const closeBtn = document.getElementById('modal-close-btn');
+  const delAfter = document.getElementById('cfg-delete-after').checked;
 
   try {
     const res = await fetch('/api/sync', {
@@ -624,7 +680,8 @@ async function startSyncJob(idx) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         nyaa_file: ep.path,
-        dub_file: dubPath
+        dub_file: dubPath,
+        delete_after: isUploaded && delAfter
       })
     });
     const result = await res.json();
@@ -632,7 +689,10 @@ async function startSyncJob(idx) {
     if (result.status === 'ok') {
       title.innerText = '✅ ¡Sincronización Exitosa!';
       desc.innerText = `Desfase: ${result.offset_sec > 0 ? '+' : ''}${result.offset_sec}s (${result.delay_ms} ms) | Confianza: ${result.score.toFixed(2)}`;
-      logs.innerText += `\n[OK] Desfase temporal detectado: ${result.delay_ms} ms\n[OK] Pista de audio inyectada con éxito sin perder calidad.\nArchivo creado:\n-> ${result.output_file}\n`;
+      logs.innerText += `\n[OK] Desfase detectado: ${result.delay_ms} ms\n[OK] Pista de audio inyectada con éxito sin perder calidad.\nArchivo creado en el disco de 8TB:\n-> ${result.output_file}\n`;
+      if (result.deleted_temp) {
+        logs.innerText += `[OK] Archivo temporal de subida eliminado para ahorrar espacio.\n`;
+      }
       closeBtn.style.display = 'inline-block';
       setTimeout(onSeriesSelected, 1500);
     } else {
@@ -801,14 +861,48 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
     def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        clean_path = parsed.path
+
+        # Endpoint de subida directa de archivos desde el navegador (PC -> Proxmox)
+        if clean_path == "/api/upload":
+            qs = urllib.parse.parse_qs(parsed.query)
+            filename = qs.get("filename", ["telegram_temp.mp4"])[0]
+            safe_name = os.path.basename(filename)
+
+            upload_dir = Path("/data/downloads/telegram_uploads") if Path("/data/downloads").exists() else Path("./telegram_uploads")
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            dest = upload_dir / safe_name
+
+            length = int(self.headers.get("Content-Length", 0))
+            remaining = length
+
+            try:
+                with open(dest, "wb") as f:
+                    while remaining > 0:
+                        chunk_size = min(remaining, 64 * 1024)
+                        chunk = self.rfile.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        remaining -= len(chunk)
+
+                self.send_json({
+                    "status": "ok",
+                    "path": str(dest.resolve()),
+                    "name": safe_name,
+                    "is_uploaded": True
+                })
+            except Exception as e:
+                self.send_json({"status": "error", "message": f"Error escribiendo archivo subido: {e}"}, status=500)
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
         try:
             payload = json.loads(body)
         except Exception:
             payload = {}
-
-        clean_path = urllib.parse.urlparse(self.path).path
 
         if clean_path == "/api/config":
             cfg = load_config()
@@ -821,6 +915,7 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
             nyaa_file = payload.get("nyaa_file", "").strip()
             dub_file = payload.get("dub_file", "").strip()
             trim = payload.get("trim", 360)
+            delete_after = payload.get("delete_after", False)
 
             if not nyaa_file or not dub_file:
                 self.send_json({"status": "error", "message": "Faltan rutas de archivo"}, status=400)
@@ -858,12 +953,21 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
                     self.send_json({"status": "error", "message": f"mkvmerge falló:\n{run_res.stderr}"}, status=500)
                     return
 
+                deleted_temp = False
+                if delete_after and os.path.exists(dub_file):
+                    try:
+                        os.remove(dub_file)
+                        deleted_temp = True
+                    except Exception:
+                        pass
+
                 self.send_json({
                     "status": "ok",
                     "offset_sec": round(offset_sec, 3),
                     "delay_ms": delay_ms,
                     "score": round(score, 2),
-                    "output_file": out_file
+                    "output_file": out_file,
+                    "deleted_temp": deleted_temp
                 })
             except Exception as e:
                 self.send_json({"status": "error", "message": str(e)}, status=500)
