@@ -289,8 +289,19 @@ def main():
     parser.add_argument("--track-name", default="Español Latino", help="Nombre descriptivo de la pista de audio")
     parser.add_argument("--default", action="store_true", help="Establecer la pista latina como audio predeterminado")
     parser.add_argument("--dry-run", action="store_true", help="Calcular el desfase sin generar el archivo final")
+    parser.add_argument("--web", action="store_true", help="Iniciar la interfaz Web UI interactiva (AutoDub Studio)")
+    parser.add_argument("--port", type=int, default=5056, help="Puerto para el servidor web (defecto: 5056)")
 
     args = parser.parse_args()
+
+    if args.web:
+        try:
+            from tools.sync_web import run_web_server
+            run_web_server(port=args.port)
+        except ImportError:
+            import sync_web
+            sync_web.run_web_server(port=args.port)
+        return
 
     check_prerequisites()
 

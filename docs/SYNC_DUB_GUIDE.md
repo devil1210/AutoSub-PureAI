@@ -18,7 +18,27 @@ Herramienta diseñada para transferir pistas de audio latino de fuentes en baja 
 
 ---
 
-## 🚀 Uso Rápido
+## 🌐 Modo Web UI (AutoDub Studio)
+
+Si prefieres usar una interfaz gráfica en tu navegador similar a AutoSub:
+
+```powershell
+python tools/sync_anime_dub.py --web
+```
+O directamente:
+```powershell
+python tools/sync_web.py
+```
+
+* Abre automáticamente en tu navegador: `http://localhost:5056`
+* **Selector de Series:** Muestra todas tus series/animes en `E:\Descargas` (o la carpeta que elijas).
+* **Inspección de Pistas:** Indica qué capítulos tienen ya audio japonés (`🇯🇵 Audio JP`), subtítulos (`💬 Sub ES`), o si ya tienen audio latino sincronizado (`🎙️ Latino OK`).
+* **Selector de Archivos de Telegram con botón `📂`:** Abre el diálogo de archivos nativo de Windows para seleccionar el video o audio descargado sin tener que escribir la ruta a mano.
+* **Barra de Progreso y Muxing:** Muestra el desfase calculado y crea el archivo en 3 a 5 segundos con un solo clic en `⚡ Sincronizar`.
+
+---
+
+## 🚀 Uso por Línea de Comandos (CLI)
 
 ### 1. Sincronizar un solo capítulo
 
