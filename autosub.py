@@ -63,6 +63,7 @@ DEFAULT_CONFIG = {
     "batch_size": 100,
     "fast_mode": False,
     "proofread": True,
+    "audit_existing": True,
     "ollama_ip": os.getenv("OLLAMA_IP", "127.0.0.1"),
     "ollama_port": int(os.getenv("OLLAMA_PORT", "11434")),
     "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
@@ -95,10 +96,13 @@ LANG_ALIASES = {
     "fr": ["fr", "fre", "fra", "french"],
     "de": ["de", "ger", "deu", "german"],
     "es": ["es", "spa", "spanish", "es-419", "es-es"],
+    "es-419": ["es-419", "es", "spa", "spanish", "lat", "latin", "latam", "spanish[lat]"],
+    "pt-br": ["pt-br", "pt", "por", "portuguese"],
     "it": ["it", "ita", "italian"],
     "pt": ["pt", "por", "portuguese", "pt-br"],
     "ru": ["ru", "rus", "russian"],
     "zh": ["zh", "chi", "zho", "chinese"],
+    "zh-cn": ["zh-cn", "zh", "chi", "zho", "chinese"],
 }
 
 config_lock = threading.RLock()
@@ -919,10 +923,6 @@ def is_translatable_ass_line(style_name, raw_text):
         return False
     return bool(re.search(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]", clean))
 
-def translate_batch(text_list, profile_data, prev_context=None):
-    if not text_list:
-        return []
-
 def translate_batch(text_list, profile_data, prev_context=None, target_lang="es-419"):
     if not text_list:
         return []
@@ -1085,6 +1085,204 @@ REGLAS CRÍTICAS E INQUEBRANTABLES:
 
     if len(corrected_texts) != len(translated_texts):
         return translated_texts
+
+    return corrected_texts
+
+def is_forced_or_signs_track(t):
+    """Detecta si una pista es forzada (signs/songs/letreros) y debe evitarse como diálogo principal."""
+    if not t:
+        return False
+    props = t.get("properties", {})
+    if props.get("forced_track") is True or props.get("forced") is True:
+        return True
+    t_name = (props.get("track_name") or "").lower()
+    bad_keywords = ["signs", "songs", "song", "carteles", "forzados", "forzado", "forced"]
+    return any(kw in t_name for kw in bad_keywords)
+
+def find_matching_target_track(sub_tracks, target_lang):
+    """Busca una pista completa no forzada que ya coincida con el idioma objetivo (ej. Spanish[LAT] para es-419)."""
+    if not sub_tracks:
+        return None
+    t_lower = target_lang.lower()
+    base_code = t_lower.split("-")[0]
+    raw_aliases = set(LANG_ALIASES.get(t_lower, [])) | set(LANG_ALIASES.get(base_code, [base_code]))
+    raw_aliases.add(t_lower)
+    raw_aliases.add(base_code)
+    aliases = [a.lower() for a in raw_aliases]
+
+    candidates = []
+    for t in sub_tracks:
+        if is_forced_or_signs_track(t):
+            continue
+        props = t.get("properties", {})
+        lang = (props.get("language") or props.get("language_ietf") or "").lower()
+        t_name = (props.get("track_name") or "").lower()
+        if any(alias in lang or alias in t_name for alias in aliases):
+            score = 5
+            if t_lower in ["es-419", "es"]:
+                if any(w in t_name or w in lang for w in ["lat", "419", "latin"]):
+                    score = 10 if t_lower == "es-419" else 4
+                elif any(w in t_name for w in ["esp", "castellano", "spain"]):
+                    score = 10 if t_lower == "es" else 4
+            candidates.append((score, t))
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
+    return None
+
+def select_source_track(sub_tracks, source_priority):
+    """Selecciona la mejor pista de origen prioritaria descartando pistas forzadas o de sólo carteles."""
+    if not sub_tracks:
+        return None
+    for lang_code in source_priority:
+        aliases = LANG_ALIASES.get(lang_code.lower(), [lang_code.lower()])
+        for t in sub_tracks:
+            if is_forced_or_signs_track(t):
+                continue
+            props = t.get("properties", {})
+            lang = (props.get("language") or props.get("language_ietf") or "").lower()
+            t_name = (props.get("track_name") or "").lower()
+            if any(alias in lang or alias in t_name for alias in aliases):
+                return t
+
+    for t in sub_tracks:
+        if not is_forced_or_signs_track(t):
+            return t
+
+    return sub_tracks[0] if sub_tracks else None
+
+def save_ass_and_srt_outputs(out_ass_path, out_srt_path, original_ass_lines, dialogue_indices, final_texts):
+    """Guarda los subtítulos ASS actualizados y genera el SRT correspondiente."""
+    new_lines = list(original_ass_lines)
+    for idx_dialogue, real_line_idx in enumerate(dialogue_indices):
+        if idx_dialogue < len(final_texts):
+            parts = new_lines[real_line_idx].split(",", 9)
+            if len(parts) == 10:
+                new_lines[real_line_idx] = ",".join(parts[:9]) + "," + sanitize_subtitle_text(final_texts[idx_dialogue]) + "\n"
+
+    with open(out_ass_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+    with open(out_srt_path, "w", encoding="utf-8") as f:
+        c_idx = 1
+        for real_line_idx in dialogue_indices:
+            line = new_lines[real_line_idx]
+            parts = line.split(",", 9)
+            start, end = parts[1], parts[2]
+            srt_txt = format_srt_text(parts[9])
+            if not srt_txt:
+                continue
+            m1 = re.match(r"(\d+):(\d{2}):(\d{2})\.(\d{2})", start)
+            m2 = re.match(r"(\d+):(\d{2}):(\d{2})\.(\d{2})", end)
+            if m1 and m2:
+                s_fmt = f"{int(m1.group(1)):02d}:{m1.group(2)}:{m1.group(3)},{int(m1.group(4))*10:03d}"
+                e_fmt = f"{int(m2.group(1)):02d}:{m2.group(2)}:{m2.group(3)},{int(m2.group(4))*10:03d}"
+                f.write(f"{c_idx}\n{s_fmt} --> {e_fmt}\n{srt_txt}\n\n")
+                c_idx += 1
+
+def save_srt_output(out_srt_path, cues, final_texts):
+    """Guarda subtítulos en formato SRT a partir de bloques cue."""
+    with open(out_srt_path, "w", encoding="utf-8") as f:
+        for idx, c in enumerate(cues):
+            text = final_texts[idx] if idx < len(final_texts) else "\\N".join(c.get("lines", []))
+            text = format_srt_text(text)
+            f.write(f"{idx + 1}\n{c['time']}\n{text}\n\n")
+
+def audit_and_polish_subtitles(sub_texts, profile_data, batch_size=100, episode_context=None, target_lang="es-419"):
+    """Audita un subtítulo preexistente contra el perfil narrativo de la serie."""
+    if not sub_texts:
+        return sub_texts
+
+    target_meta = SUPPORTED_TARGET_LANGUAGES.get(target_lang, SUPPORTED_TARGET_LANGUAGES["es-419"])
+    prompt_lang = target_meta["prompt_name"]
+
+    chars_list = []
+    for c in profile_data.get("characters", []):
+        name = c.get("name", "")
+        gender = c.get("gender", "")
+        pers = c.get("personality", "")
+        g_tag = f" [{gender}]" if gender else ""
+        chars_list.append(f"- {name}{g_tag}: {pers}")
+    chars_info = "\n".join(chars_list) if chars_list else "Sin personajes específicos."
+
+    glossary_info = ", ".join([f"'{k}' -> '{v}'" for k, v in profile_data.get("glossary", {}).items()])
+    setting_info = profile_data.get("setting", "Anime")
+    tone_info = profile_data.get("tone_instructions", f"Tono natural en {target_meta['name']}.")
+
+    ep_context_str = ""
+    if episode_context and isinstance(episode_context, dict) and episode_context.get("summary"):
+        ep_context_str += f"CONTEXTO DEL EPISODIO ACTUAL ({episode_context.get('episode', 'Actual')}):\n{episode_context.get('summary')}\n"
+
+    past_eps = profile_data.get("episodes", [])
+    if past_eps and isinstance(past_eps, list):
+        filtered_past = [
+            e for e in past_eps
+            if not episode_context or (e.get("episode") != episode_context.get("episode") and e.get("file_name") != episode_context.get("file_name"))
+        ]
+        if filtered_past:
+            recent_past = filtered_past[-2:]
+            p_lines = "\n".join([f"- {e.get('episode', 'Ep')}: {e.get('summary', '')[:160]}" for e in recent_past if e.get("summary")])
+            if p_lines:
+                ep_context_str += f"RESUMEN DE CAPÍTULOS ANTERIORES:\n{p_lines}\n"
+
+    dialect_instruction = ""
+    if target_lang == "es-419":
+        dialect_instruction = "3. ADAPTACIÓN DIALECTAL: Si detectas modismos o conjugaciones peninsulares (español de España como 'vosotros teníais', 'ordenador', 'gilipollas', 'tío', 'vale', etc.), adáptalos a español latinoamericano neutro natural ('ustedes tenían', 'computadora', 'idiota', 'de acuerdo', etc.).\n"
+
+    sys_prompt = f"""Eres un supervisor editorial, auditor y corrector senior de subtítulos de anime al {prompt_lang}.
+Tu tarea es AUDITAR y PULIR un subtítulo existente para garantizar máxima coherencia con el lore de la serie y las normas de estilo:
+SERIE: {profile_data.get('series_title', 'Anime')} ({profile_data.get('official_title', '')})
+AMBIENTACIÓN: {setting_info}
+TONO Y ESTILO: {tone_info}
+{ep_context_str}PERSONAJES Y GÉNEROS (verifica que pronombres y adjetivos concuerden):
+{chars_info}
+GLOSARIO OBLIGATORIO: {glossary_info}
+
+CRITERIOS DE AUDITORÍA Y CORRECCIÓN:
+1. CONCORDANCIA DE GÉNERO Y PERSONAJES: Asegúrate de que los adjetivos y pronombres concuerden con el género del personaje que habla o al que se dirigen.
+2. GLOSARIO OBLIGATORIO: Si un término clave de la serie aparece de forma distinta o inconsistente, cámbialo para que coincida EXACTAMENTE con el GLOSARIO OBLIGATORIO.
+{dialect_instruction}4. ERRORES TIPOGRÁFICOS / ORTOGRÁFICOS: Corrige faltas de ortografía, tildes y errores gramaticales evidentes.
+5. PRESERVAR LO QUE ESTÁ BIEN: Si una línea es correcta, natural y tiene buen sentido, DEVUÉLVELA EXACTAMENTE IGUAL. Preserva modismos apropiados (por ejemplo términos de anime/gaming como 'eroge', 'prota', 'mal tercio') y no hagas cambios puramente subjetivos.
+
+REGLAS CRÍTICAS E INQUEBRANTABLES:
+1. NUNCA AGREGUES NI ELIMINES LÍNEAS. Debe haber exactamente una línea de salida por cada línea de entrada.
+2. Devuelve las líneas con su numeración exacta en formato: [N] Texto en {prompt_lang}
+3. IMPORTANTE: NUNCA incluyas prefijos como 'ES:', 'Original:', 'Revisado:' ni comentarios explicativos.
+4. Mantén TODAS las etiquetas ASS entre llaves (ej. {{\\i1}}, {{\\pos(x,y)}}) y saltos \\N intactos en la misma posición.
+5. NO incluyas notas, comentarios, explicaciones ni texto adicional antes o después."""
+
+    corrected_texts = list(sub_texts)
+
+    for i in range(0, len(sub_texts), batch_size):
+        batch = sub_texts[i:i + batch_size]
+        numbered_items = [f"[{idx + 1}] {line}" for idx, line in enumerate(batch)]
+        user_prompt = f"Audita y pule estas líneas existentes al {prompt_lang}. Devuelve ÚNICAMENTE el texto final en formato [1] a [{len(batch)}]:\n" + "\n".join(numbered_items) + "\n/no_think"
+
+        resp = call_ai(user_prompt, system_instruction=sys_prompt, timeout=120)
+        if not resp:
+            continue
+
+        parsed_corrections = {}
+        for line in resp.strip().split("\n"):
+            m = re.match(r"^\[?(\d+)\]?[\.\:\)]?\s*(.*)$", line.strip())
+            if m:
+                num = int(m.group(1)) - 1
+                val = m.group(2).strip()
+                val = re.sub(r"^.*?(?:\||=>)\s*(?:[A-Za-z0-9\-]+|Traducci[oó]n|Revisi[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
+                val = re.sub(r"^(?:[A-Za-z0-9\-]+|Traducci[oó]n|Revisi[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
+                if 0 <= num < len(batch) and val:
+                    parsed_corrections[num] = val
+
+        if len(parsed_corrections) >= len(batch) * 0.75:
+            for idx_in_batch in range(len(batch)):
+                global_idx = i + idx_in_batch
+                if idx_in_batch in parsed_corrections:
+                    corr = parsed_corrections[idx_in_batch]
+                    if corr:
+                        corrected_texts[global_idx] = corr
+
+    if len(corrected_texts) != len(sub_texts):
+        return sub_texts
 
     return corrected_texts
 
@@ -1284,20 +1482,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     m_info = json.loads(p_info.stdout)
                     sub_trks = [t for t in m_info.get("tracks", []) if t.get("type") == "subtitles"]
                     source_priority = app_config.get("source_priority", ["ja", "en", "fr", "de", "es", "it", "pt", "ru", "zh"])
-                    pref_trk = None
-                    for lang_code in source_priority:
-                        aliases = LANG_ALIASES.get(lang_code.lower(), [lang_code.lower()])
-                        for t in sub_trks:
-                            props = t.get("properties", {})
-                            lang = (props.get("language") or props.get("language_ietf") or "").lower()
-                            t_name = (props.get("track_name") or "").lower()
-                            if any(alias in lang or alias in t_name for alias in aliases):
-                                pref_trk = t
-                                break
-                        if pref_trk:
-                            break
-                    if not pref_trk and sub_trks:
-                        pref_trk = sub_trks[0]
+                    pref_trk = select_source_track(sub_trks, source_priority)
                     if pref_trk:
                         t_ext = ".ass" if "substation" in pref_trk.get("codec", "").lower() or "ass" in pref_trk.get("codec", "").lower() else ".srt"
                         t_tmp = os.path.join(tempfile.gettempdir(), f"autosub_ctx_{int(time.time()*1000)}_{base_name}{t_ext}")
@@ -1357,259 +1542,241 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
     tracks = info.get("tracks", [])
     sub_tracks = [t for t in tracks if t.get("type") == "subtitles"]
-    selected_track = None
-    source_priority = app_config.get("source_priority", ["ja", "en", "fr", "de", "es", "it", "pt", "ru", "zh"])
-    for lang_code in source_priority:
-        aliases = LANG_ALIASES.get(lang_code.lower(), [lang_code.lower()])
-        for t in sub_tracks:
-            props = t.get("properties", {})
-            lang = (props.get("language") or props.get("language_ietf") or "").lower()
-            t_name = (props.get("track_name") or "").lower()
-            if any(alias in lang or alias in t_name for alias in aliases):
-                selected_track = t
-                break
-        if selected_track:
-            break
-    if not selected_track and sub_tracks:
-        selected_track = sub_tracks[0]
-    if not selected_track:
+    if not sub_tracks:
         return False
 
-    track_id = selected_track["id"]
-    codec = selected_track.get("codec", "")
-    is_ass = "substation" in codec.lower() or "ass" in codec.lower() or "ssa" in codec.lower()
-    temp_ext = ".ass" if is_ass else ".srt"
-    temp_file = os.path.join(tempfile.gettempdir(), f"autosub_raw_{int(time.time()*1000)}_{base_name}{temp_ext}")
+    profile_data, profile_path = get_or_create_series_profile(series_name)
+    source_priority = app_config.get("source_priority", ["ja", "en", "fr", "de", "es", "it", "pt", "ru", "zh"])
+    base_batch = app_config.get("batch_size", 100)
+    audit_enabled = app_config.get("audit_existing", True)
+    proofread_enabled = app_config.get("proofread", True)
+
+    num_targets = max(1, len(target_langs))
+    if num_targets > 1:
+        batch_size = max(25, int(base_batch / (1 + 0.35 * (num_targets - 1))))
+    else:
+        batch_size = base_batch
+
+    source_data = None
+    created_temp_files = []
+    any_success = False
 
     try:
-        subprocess.run(["mkvextract", "tracks", video_path, f"{track_id}:{temp_file}"], check=True, capture_output=True)
-        if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
-            enqueue_retry(video_path, force, series_name, "Fallo al extraer subtítulo con mkvextract", context_only=context_only, target_languages=target_langs)
-            return False
+        for lang_idx, target_lang in enumerate(target_langs):
+            lang_meta = SUPPORTED_TARGET_LANGUAGES.get(target_lang, {})
+            lang_name = lang_meta.get("name", target_lang)
+            ext_code = lang_meta.get("ext", target_lang).lower()
+            out_ass = os.path.join(base_dir, f"{base_name}.{ext_code}.ass")
+            out_srt = os.path.join(base_dir, f"{base_name}.{ext_code}.srt")
 
-        profile_data, profile_path = get_or_create_series_profile(series_name)
+            # 1. ¿Existe una pista preexistente no forzada que coincida con el idioma objetivo?
+            existing_target_trk = find_matching_target_track(sub_tracks, target_lang) if audit_enabled else None
+            if existing_target_trk:
+                trk_id = existing_target_trk["id"]
+                trk_codec = existing_target_trk.get("codec", "")
+                trk_is_ass = "substation" in trk_codec.lower() or "ass" in trk_codec.lower() or "ssa" in trk_codec.lower()
+                t_ext = ".ass" if trk_is_ass else ".srt"
+                tmp_tgt = os.path.join(tempfile.gettempdir(), f"autosub_audit_{int(time.time()*1000)}_{base_name}{t_ext}")
+                created_temp_files.append(tmp_tgt)
+                try:
+                    subprocess.run(["mkvextract", "tracks", video_path, f"{trk_id}:{tmp_tgt}"], check=True, capture_output=True)
+                    if os.path.exists(tmp_tgt) and os.path.getsize(tmp_tgt) > 0:
+                        if trk_is_ass:
+                            with open(tmp_tgt, "r", encoding="utf-8", errors="ignore") as f_ass:
+                                ass_lines = f_ass.readlines()
+                            d_indices = []
+                            d_texts = []
+                            for idx, line in enumerate(ass_lines):
+                                if line.startswith("Dialogue:"):
+                                    parts = line.split(",", 9)
+                                    if len(parts) == 10:
+                                        s_name = parts[3].strip()
+                                        t_val = parts[9].rstrip("\r\n")
+                                        if is_translatable_ass_line(s_name, t_val):
+                                            d_indices.append(idx)
+                                            d_texts.append(t_val)
 
-        if is_ass:
-            with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
+                            if not d_texts:
+                                continue
 
-            dialogue_indices = []
-            raw_texts = []
-            for idx, line in enumerate(lines):
-                if line.startswith("Dialogue:"):
-                    parts = line.split(",", 9)
-                    if len(parts) == 10:
-                        style_name = parts[3].strip()
-                        txt = parts[9].rstrip("\r\n")
-                        if is_translatable_ass_line(style_name, txt):
-                            dialogue_indices.append(idx)
-                            raw_texts.append(txt)
+                            if context_only:
+                                generate_and_save_episode_context(series_name, video_path, d_texts, d_texts, profile_data, profile_path)
+                                last_job_metrics["lines_count"] = len(d_texts)
+                                last_job_metrics["format"] = "Contexto (Pista Extraída)"
+                                return True
 
-            if not raw_texts:
-                return True
+                            last_job_metrics["lines_count"] = len(d_texts)
+                            last_job_metrics["format"] = f"ASS + SRT (Pista {trk_id} Auditada)"
+                            trk_name_lbl = existing_target_trk.get("properties", {}).get("track_name", "")
+                            print(f"[AutoSub] Pista preexistente encontrada para {target_lang} (Pista {trk_id}: {trk_name_lbl}). Auditando y puliendo con IA ({len(d_texts)} líneas)...", flush=True)
 
-            if context_only:
-                print(f"[AutoSub] Modo Solo Contexto: Analizando {len(raw_texts)} líneas extraídas del video...", flush=True)
-                generate_and_save_episode_context(series_name, video_path, raw_texts, raw_texts, profile_data, profile_path)
-                last_job_metrics["lines_count"] = len(raw_texts)
-                last_job_metrics["format"] = "Contexto (Pista Extraída)"
-                return True
+                            ep_context = generate_and_save_episode_context(series_name, video_path, d_texts, d_texts, profile_data, profile_path)
+                            if proofread_enabled:
+                                audited_texts = audit_and_polish_subtitles(d_texts, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
+                            else:
+                                audited_texts = d_texts
 
-            last_job_metrics["lines_count"] = len(raw_texts)
-            last_job_metrics["format"] = "ASS + SRT"
-
-            # Adaptive batching quota protection:
-            # If translating to multiple target languages, scale batch size down and pace
-            num_targets = max(1, len(target_langs))
-            base_batch = app_config.get("batch_size", 100)
-            if num_targets > 1:
-                batch_size = max(25, int(base_batch / (1 + 0.35 * (num_targets - 1))))
-            else:
-                batch_size = base_batch
-
-            total_batches_per_lang = (len(raw_texts) + batch_size - 1) // batch_size
-            with processing_lock:
-                current_total_batches = total_batches_per_lang * num_targets
-
-            ep_context = None
-            any_success = False
-
-            for lang_idx, target_lang in enumerate(target_langs):
-                lang_meta = SUPPORTED_TARGET_LANGUAGES.get(target_lang, {})
-                lang_name = lang_meta.get("name", target_lang)
-                ext_code = lang_meta.get("ext", target_lang).lower()
-                out_ass = os.path.join(base_dir, f"{base_name}.{ext_code}.ass")
-                out_srt = os.path.join(base_dir, f"{base_name}.{ext_code}.srt")
-
-                print(f"[AutoSub] ({lang_idx+1}/{num_targets}) Traduciendo al {lang_name} ({target_lang}) en lotes de {batch_size} líneas...", flush=True)
-
-                translated_texts = []
-                prev_ctx = None
-                translation_success = True
-
-                for i in range(0, len(raw_texts), batch_size):
-                    batch_num = (lang_idx * total_batches_per_lang) + (i // batch_size + 1)
-                    with processing_lock:
-                        current_batch_num = batch_num
-
-                    with cancel_lock:
-                        if cancel_current_flag:
-                            translation_success = False
-                            print(f"[AutoSub] Cancelado por el usuario: {video_path}", flush=True)
-                            break
-
-                    batch = raw_texts[i:i + batch_size]
-                    trans = translate_batch(batch, profile_data, prev_context=prev_ctx, target_lang=target_lang)
-                    if trans is None:
-                        translation_success = False
-                        break
-                    translated_texts.extend(trans)
-                    prev_ctx = batch[-2:]
-                    time.sleep(0.2)
-
-                if not translation_success:
-                    enqueue_retry(video_path, force, series_name, f"Error IA traduciendo lote ASS ({target_lang})", context_only=context_only, target_languages=target_langs)
-                    continue
-
-                if ep_context is None:
-                    ep_context = generate_and_save_episode_context(series_name, video_path, raw_texts, translated_texts, profile_data, profile_path)
-
-                if app_config.get("proofread", True):
-                    print(f"[AutoSub] Realizando revisión final y pulido para {lang_name} ({len(translated_texts)} líneas)...", flush=True)
-                    translated_texts = proofread_subtitles(raw_texts, translated_texts, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
-
-                new_lines = list(lines)
-                for idx_dialogue, real_line_idx in enumerate(dialogue_indices):
-                    if idx_dialogue < len(translated_texts):
-                        parts = new_lines[real_line_idx].split(",", 9)
-                        if len(parts) == 10:
-                            new_lines[real_line_idx] = ",".join(parts[:9]) + "," + sanitize_subtitle_text(translated_texts[idx_dialogue]) + "\n"
-
-                with open(out_ass, "w", encoding="utf-8") as f:
-                    f.writelines(new_lines)
-
-                with open(out_srt, "w", encoding="utf-8") as f:
-                    c_idx = 1
-                    for real_line_idx in dialogue_indices:
-                        line = new_lines[real_line_idx]
-                        parts = line.split(",", 9)
-                        start, end = parts[1], parts[2]
-                        srt_txt = format_srt_text(parts[9])
-                        if not srt_txt:
+                            save_ass_and_srt_outputs(out_ass, out_srt, ass_lines, d_indices, audited_texts)
+                            any_success = True
                             continue
-                        m1 = re.match(r"(\d+):(\d{2}):(\d{2})\.(\d{2})", start)
-                        m2 = re.match(r"(\d+):(\d{2}):(\d{2})\.(\d{2})", end)
-                        if m1 and m2:
-                            s_fmt = f"{int(m1.group(1)):02d}:{m1.group(2)}:{m1.group(3)},{int(m1.group(4))*10:03d}"
-                            e_fmt = f"{int(m2.group(1)):02d}:{m2.group(2)}:{m2.group(3)},{int(m2.group(4))*10:03d}"
-                            f.write(f"{c_idx}\n{s_fmt} --> {e_fmt}\n{srt_txt}\n\n")
-                            c_idx += 1
+                        else:
+                            with open(tmp_tgt, "r", encoding="utf-8", errors="ignore") as f_srt:
+                                srt_content = f_srt.read()
+                            blocks = srt_content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
+                            srt_cues = []
+                            for b in blocks:
+                                blines = b.split("\n")
+                                if len(blines) >= 3 and "-->" in blines[1]:
+                                    srt_cues.append({
+                                        "id": blines[0],
+                                        "time": blines[1],
+                                        "lines": blines[2:]
+                                    })
+                            srt_texts = ["\\N".join(c["lines"]) for c in srt_cues]
+                            if not srt_texts:
+                                continue
 
-                any_success = True
-                if num_targets > 1:
-                    time.sleep(0.3)
+                            if context_only:
+                                generate_and_save_episode_context(series_name, video_path, srt_texts, srt_texts, profile_data, profile_path)
+                                last_job_metrics["lines_count"] = len(srt_texts)
+                                last_job_metrics["format"] = "Contexto (Pista Extraída)"
+                                return True
 
-            if not any_success:
-                return False
+                            last_job_metrics["lines_count"] = len(srt_texts)
+                            last_job_metrics["format"] = f"SRT (Pista {trk_id} Auditada)"
+                            ep_context = generate_and_save_episode_context(series_name, video_path, srt_texts, srt_texts, profile_data, profile_path)
+                            if proofread_enabled:
+                                audited_texts = audit_and_polish_subtitles(srt_texts, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
+                            else:
+                                audited_texts = srt_texts
 
-        else:
-            with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
+                            save_srt_output(out_srt, srt_cues, audited_texts)
+                            any_success = True
+                            continue
+                except Exception as e_aud:
+                    print(f"[AutoSub] ⚠️ Fallo al auditar pista preexistente ({e_aud}), recurriendo a traducción tradicional...", flush=True)
 
-            blocks = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
-            cues = []
-            for b in blocks:
-                lines = b.split("\n")
-                if len(lines) >= 3 and "-->" in lines[1]:
-                    cues.append({
-                        "id": lines[0],
-                        "time": lines[1],
-                        "lines": lines[2:]
-                    })
+            # 2. Si no había pista preexistente para target_lang, extraer fuente y traducir
+            if source_data is None:
+                selected_track = select_source_track(sub_tracks, source_priority)
+                if not selected_track:
+                    continue
+                track_id = selected_track["id"]
+                codec = selected_track.get("codec", "")
+                src_is_ass = "substation" in codec.lower() or "ass" in codec.lower() or "ssa" in codec.lower()
+                temp_ext = ".ass" if src_is_ass else ".srt"
+                temp_file = os.path.join(tempfile.gettempdir(), f"autosub_raw_{int(time.time()*1000)}_{base_name}{temp_ext}")
+                created_temp_files.append(temp_file)
+                subprocess.run(["mkvextract", "tracks", video_path, f"{track_id}:{temp_file}"], check=True, capture_output=True)
+                if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
+                    continue
 
-            all_texts = ["\\N".join(c["lines"]) for c in cues]
-            if not all_texts:
-                return True
+                if src_is_ass:
+                    with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                    dialogue_indices = []
+                    raw_texts = []
+                    for idx, line in enumerate(lines):
+                        if line.startswith("Dialogue:"):
+                            parts = line.split(",", 9)
+                            if len(parts) == 10:
+                                style_name = parts[3].strip()
+                                txt = parts[9].rstrip("\r\n")
+                                if is_translatable_ass_line(style_name, txt):
+                                    dialogue_indices.append(idx)
+                                    raw_texts.append(txt)
+                    source_data = {
+                        "is_ass": True,
+                        "lines": lines,
+                        "indices": dialogue_indices,
+                        "texts": raw_texts,
+                        "track": selected_track
+                    }
+                else:
+                    with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                    blocks = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
+                    cues = []
+                    for b in blocks:
+                        lines = b.split("\n")
+                        if len(lines) >= 3 and "-->" in lines[1]:
+                            cues.append({
+                                "id": lines[0],
+                                "time": lines[1],
+                                "lines": lines[2:]
+                            })
+                    all_texts = ["\\N".join(c["lines"]) for c in cues]
+                    source_data = {
+                        "is_ass": False,
+                        "cues": cues,
+                        "texts": all_texts,
+                        "track": selected_track
+                    }
 
+            if not source_data or not source_data["texts"]:
+                continue
+
+            src_texts = source_data["texts"]
             if context_only:
-                print(f"[AutoSub] Modo Solo Contexto: Analizando {len(all_texts)} líneas extraídas del video...", flush=True)
-                generate_and_save_episode_context(series_name, video_path, all_texts, all_texts, profile_data, profile_path)
-                last_job_metrics["lines_count"] = len(all_texts)
+                generate_and_save_episode_context(series_name, video_path, src_texts, src_texts, profile_data, profile_path)
+                last_job_metrics["lines_count"] = len(src_texts)
                 last_job_metrics["format"] = "Contexto (Pista Extraída)"
                 return True
 
-            last_job_metrics["lines_count"] = len(all_texts)
-            last_job_metrics["format"] = "SRT"
+            last_job_metrics["lines_count"] = len(src_texts)
+            last_job_metrics["format"] = "ASS + SRT" if source_data["is_ass"] else "SRT"
 
-            num_targets = max(1, len(target_langs))
-            base_batch = app_config.get("batch_size", 100)
-            if num_targets > 1:
-                batch_size = max(25, int(base_batch / (1 + 0.35 * (num_targets - 1))))
-            else:
-                batch_size = base_batch
-
-            total_batches_per_lang = (len(all_texts) + batch_size - 1) // batch_size
+            total_batches = (len(src_texts) + batch_size - 1) // batch_size
             with processing_lock:
-                current_total_batches = total_batches_per_lang * num_targets
+                current_total_batches = total_batches * num_targets
 
-            ep_context = None
-            any_success = False
+            print(f"[AutoSub] ({lang_idx+1}/{num_targets}) Traduciendo al {lang_name} ({target_lang}) en lotes de {batch_size} líneas...", flush=True)
 
-            for lang_idx, target_lang in enumerate(target_langs):
-                lang_meta = SUPPORTED_TARGET_LANGUAGES.get(target_lang, {})
-                lang_name = lang_meta.get("name", target_lang)
-                ext_code = lang_meta.get("ext", target_lang).lower()
-                out_srt = os.path.join(base_dir, f"{base_name}.{ext_code}.srt")
+            translated_texts = []
+            prev_ctx = None
+            translation_success = True
 
-                print(f"[AutoSub] ({lang_idx+1}/{num_targets}) Traduciendo al {lang_name} ({target_lang}) en lotes de {batch_size} líneas...", flush=True)
+            for i in range(0, len(src_texts), batch_size):
+                batch_num = (lang_idx * total_batches) + (i // batch_size + 1)
+                with processing_lock:
+                    current_batch_num = batch_num
 
-                translated = []
-                prev_ctx = None
-                translation_success = True
-
-                for i in range(0, len(all_texts), batch_size):
-                    batch_num = (lang_idx * total_batches_per_lang) + (i // batch_size + 1)
-                    with processing_lock:
-                        current_batch_num = batch_num
-
-                    with cancel_lock:
-                        if cancel_current_flag:
-                            translation_success = False
-                            print(f"[AutoSub] Cancelado por el usuario: {video_path}", flush=True)
-                            break
-
-                    batch = all_texts[i:i + batch_size]
-                    trans = translate_batch(batch, profile_data, prev_context=prev_ctx, target_lang=target_lang)
-                    if trans is None:
+                with cancel_lock:
+                    if cancel_current_flag:
                         translation_success = False
+                        print(f"[AutoSub] Cancelado por el usuario: {video_path}", flush=True)
                         break
-                    translated.extend(trans)
-                    prev_ctx = batch[-2:]
-                    time.sleep(0.2)
 
-                if not translation_success:
-                    enqueue_retry(video_path, force, series_name, f"Error IA traduciendo lote SRT ({target_lang})", context_only=context_only, target_languages=target_langs)
-                    continue
+                batch = src_texts[i:i + batch_size]
+                trans = translate_batch(batch, profile_data, prev_context=prev_ctx, target_lang=target_lang)
+                if trans is None:
+                    translation_success = False
+                    break
+                translated_texts.extend(trans)
+                prev_ctx = batch[-2:]
+                time.sleep(0.2)
 
-                if ep_context is None:
-                    ep_context = generate_and_save_episode_context(series_name, video_path, all_texts, translated, profile_data, profile_path)
+            if not translation_success:
+                enqueue_retry(video_path, force, series_name, f"Error IA traduciendo lote ({target_lang})", context_only=context_only, target_languages=target_langs)
+                continue
 
-                if app_config.get("proofread", True):
-                    print(f"[AutoSub] Realizando revisión final y pulido para {lang_name} ({len(translated)} líneas)...", flush=True)
-                    translated = proofread_subtitles(all_texts, translated, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
+            ep_context = generate_and_save_episode_context(series_name, video_path, src_texts, translated_texts, profile_data, profile_path)
 
-                with open(out_srt, "w", encoding="utf-8") as f:
-                    for idx, c in enumerate(cues):
-                        text = translated[idx] if idx < len(translated) else "\\N".join(c["lines"])
-                        text = format_srt_text(text)
-                        f.write(f"{idx + 1}\n{c['time']}\n{text}\n\n")
+            if proofread_enabled:
+                print(f"[AutoSub] Realizando revisión final y pulido para {lang_name} ({len(translated_texts)} líneas)...", flush=True)
+                translated_texts = proofread_subtitles(src_texts, translated_texts, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
 
-                any_success = True
-                if num_targets > 1:
-                    time.sleep(0.3)
+            if source_data["is_ass"]:
+                save_ass_and_srt_outputs(out_ass, out_srt, source_data["lines"], source_data["indices"], translated_texts)
+            else:
+                save_srt_output(out_srt, source_data["cues"], translated_texts)
 
-            if not any_success:
-                return False
+            any_success = True
+            if num_targets > 1:
+                time.sleep(0.3)
+
+        if not any_success:
+            return False
 
         with queue_lock:
             if video_path in retry_queue:
@@ -1620,11 +1787,12 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
         enqueue_retry(video_path, force, series_name, str(ex), context_only=context_only, target_languages=target_langs)
         return False
     finally:
-        if temp_file and os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except OSError:
-                pass
+        for tf in created_temp_files:
+            if tf and os.path.exists(tf):
+                try:
+                    os.remove(tf)
+                except OSError:
+                    pass
     return True
 
 def queue_worker():
@@ -3514,7 +3682,7 @@ class AutoSubHandler(BaseHTTPRequestHandler):
         if clean_path == "/api/config":
             with config_lock:
                 for k in ["local_only", "local_model", "cloud_model", "enable_openrouter", "batch_size",
-                          "fast_mode", "proofread", "ollama_ip", "ollama_port", "gemini_api_key",
+                          "fast_mode", "proofread", "audit_existing", "ollama_ip", "ollama_port", "gemini_api_key",
                           "openrouter_api_key", "watch_paths", "libraries", "source_priority", "target_languages"]:
                     if k in payload:
                         app_config[k] = payload[k]

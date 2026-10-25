@@ -86,5 +86,22 @@ AutoSub outputs Plex/Jellyfin standard subtitle naming:
     "target_languages": ["es-419", "en"]
   }
   ```
-- `POST /api/config`: Save app configuration (`libraries`, `source_priority`, `cloud_model`, etc.).
+- `POST /api/config`: Save app configuration (`libraries`, `source_priority`, `cloud_model`, `audit_existing`, etc.).
 - `POST /api/cancel`: Abort current translating job.
+
+---
+
+## 6. Smart Target Track Detection & Contextual AI QA
+
+When AutoSub encounters a media file for a requested target language (e.g. `es-419`):
+
+1. **Forced & Signs Rejection:** Pistas con flag `forced_track=True` o que contengan keywords como `signs`, `songs`, `carteles`, `forzados` son ignoradas automáticamente como diálogos principales para evitar subtítulos incompletos.
+2. **Pre-existing Track Detection:** Si el contenedor MKV ya incluye una pista no forzada en el idioma objetivo (ej. `Track 10: Spanish[LAT]` para `es-419`), AutoSub evita traducir de cero.
+3. **AI Contextual Audit Pass (`audit_and_polish_subtitles`):**
+   - Compara el subtítulo existente contra el Perfil Narrativo de la serie (`/data/tvshows/.profiles/{series}.json`).
+   - Corrige concordancias de género y pronombres de personajes registrados.
+   - Aplica el **Glosario Obligatorio** unificado de la serie.
+   - Realiza **armonización dialectal** (adapta giros de España como *vosotros/ordenador/vale* a neutro latino *ustedes/computadora/de acuerdo*).
+   - Preserva al 100% las adaptaciones humanas nativas correctas (*eroge*, *prota*, *mal tercio*).
+4. **Fallback Automático:** Si no existe pista en el idioma objetivo, se selecciona la mejor pista fuente no forzada (`ja`, `en`, etc.) y se ejecuta la traducción tradicional + proofreading.
+
