@@ -5,6 +5,7 @@ sync_web.py - Servidor Web UI para Sincronización Automática de Audio Latino
 
 Interfaz moderna inspirada en AutoSub para seleccionar series, capítulos de Nyaa
 e inyectar pistas de audio de Telegram con ajuste de desfase milimétrico.
+Compatible con Proxmox LXC (Alpine Linux) y Windows.
 """
 
 import os
@@ -20,26 +21,42 @@ from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Importar funciones de sincronización de sync_anime_dub
-from tools.sync_anime_dub import (
-    MKVMERGE_BIN, FFMPEG_BIN, check_prerequisites,
-    get_mkv_tracks, get_audio_track_id, calculate_offset,
-    sync_single_episode, extract_episode_number
-)
+try:
+    from tools.sync_anime_dub import (
+        MKVMERGE_BIN, FFMPEG_BIN, check_prerequisites,
+        get_mkv_tracks, get_audio_track_id, calculate_offset,
+        sync_single_episode, extract_episode_number
+    )
+except ImportError:
+    from sync_anime_dub import (
+        MKVMERGE_BIN, FFMPEG_BIN, check_prerequisites,
+        get_mkv_tracks, get_audio_track_id, calculate_offset,
+        sync_single_episode, extract_episode_number
+    )
 
 PORT = 5056
 CONFIG_FILE = Path(__file__).parent / "sync_web_config.json"
 
+IS_WINDOWS = os.name == "nt"
+
+# Detección inteligente de rutas por defecto
+if not IS_WINDOWS and os.path.exists("/data/tvshows"):
+    DEFAULT_ANIME = "/data/tvshows"
+    DEFAULT_TELEGRAM = "/data/downloads"
+elif os.path.exists("E:\\Descargas"):
+    DEFAULT_ANIME = r"E:\Descargas"
+    DEFAULT_TELEGRAM = r"E:\Descargas"
+else:
+    DEFAULT_ANIME = str(Path.home())
+    DEFAULT_TELEGRAM = str(Path.home())
+
 DEFAULT_CONFIG = {
-    "anime_root_dir": r"E:\Descargas",
-    "telegram_root_dir": r"E:\Descargas",
+    "anime_root_dir": DEFAULT_ANIME,
+    "telegram_root_dir": DEFAULT_TELEGRAM,
     "trim_seconds": 360,
     "default_track": False,
     "track_name": "Español Latino"
 }
-
-# Estado de trabajos en segundo plano
-jobs_lock = threading.Lock()
-active_jobs = {}
 
 
 def load_config():
@@ -61,7 +78,9 @@ def save_config(cfg):
 
 
 def open_file_dialog_windows(initial_dir=""):
-    """Abre el diálogo nativo de Windows para seleccionar un archivo."""
+    """Abre el diálogo nativo de Windows si se ejecuta en Windows."""
+    if not IS_WINDOWS:
+        return ""
     ps_script = f'''
     Add-Type -AssemblyName System.Windows.Forms
     $d = New-Object System.Windows.Forms.OpenFileDialog
@@ -83,7 +102,9 @@ def open_file_dialog_windows(initial_dir=""):
 
 
 def open_folder_dialog_windows(initial_dir=""):
-    """Abre el diálogo nativo de Windows para seleccionar una carpeta."""
+    """Abre el diálogo nativo de Windows para carpetas si se ejecuta en Windows."""
+    if not IS_WINDOWS:
+        return ""
     ps_script = f'''
     Add-Type -AssemblyName System.Windows.Forms
     $d = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -107,7 +128,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoDub Sync Studio | Doblaje Latino Inteligente</title>
+  <title>AutoDub Studio | Sincronización Acústica Proxmox</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -197,11 +218,9 @@ HTML_PAGE = """<!DOCTYPE html>
 
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
-    /* Series Dropdown & Controls */
     .controls-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .controls-row select { flex: 1; min-width: 280px; }
 
-    /* Table styling */
     .table-container { overflow-x: auto; margin-top: 10px; border-radius: 10px; border: 1px solid var(--border); }
     table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
     th { background: rgba(15, 23, 42, 0.8); padding: 12px 14px; color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border); }
@@ -217,19 +236,18 @@ HTML_PAGE = """<!DOCTYPE html>
     .badge-gray { background: rgba(148, 163, 184, 0.1); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.2); }
     .badge-purple { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
 
-    /* File picker field */
     .dub-input-group { display: flex; gap: 6px; align-items: center; width: 100%; min-width: 340px; }
     .dub-input-group input { font-size: 12px; padding: 7px 10px; font-family: monospace; }
 
-    /* Modal / Progress overlay */
-    #sync-modal {
+    /* Modal / File Browser */
+    .modal-overlay {
       display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px);
       z-index: 9999; justify-content: center; align-items: center;
     }
     .modal-box {
       background: #111827; border: 1px solid var(--border);
-      border-radius: 16px; padding: 28px; width: 560px; max-width: 90%;
+      border-radius: 16px; padding: 24px; width: 620px; max-width: 95%;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
     }
     .progress-bar-wrap {
@@ -251,6 +269,15 @@ HTML_PAGE = """<!DOCTYPE html>
       border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px;
       color: #94a3b8; max-height: 180px; overflow-y: auto; white-space: pre-wrap;
     }
+    .fs-list {
+      max-height: 350px; overflow-y: auto; background: #090d16;
+      border: 1px solid var(--border); border-radius: 8px; margin: 12px 0;
+    }
+    .fs-item {
+      padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
+      cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 13px;
+    }
+    .fs-item:hover { background: rgba(56, 189, 248, 0.1); }
   </style>
 </head>
 <body>
@@ -260,23 +287,46 @@ HTML_PAGE = """<!DOCTYPE html>
     <div class="logo-box">
       <div class="logo-icon">🎙️</div>
       <div class="logo-title">
-        <h1>AutoDub Sync Studio</h1>
-        <p>Alineación acústica milimétrica e inyección de audio latino en videos de Nyaa 1080p</p>
+        <h1>AutoDub Studio Proxmox</h1>
+        <p>Alineación acústica de precisión e inyección de audio latino en tu disco de 8TB</p>
       </div>
     </div>
-    <div class="status-badge">
-      <div class="status-dot"></div>
-      <span>MKVToolNix + FFmpeg Listos</span>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <a href="http://192.168.1.125:5055" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration:none;">
+        📺 Abrir AutoSub (Subtítulos)
+      </a>
+      <div class="status-badge">
+        <div class="status-dot"></div>
+        <span>LXC 125 Activo</span>
+      </div>
     </div>
   </header>
 
-  <!-- Card: Configuración de Carpetas -->
+  <!-- Card: Configuración de Carpetas en el Disco de 8TB -->
   <div class="card">
-    <div class="card-title">📂 Carpeta Raíz de Animes / Series</div>
-    <div style="display:flex; gap:12px; align-items:center;">
-      <input type="text" id="cfg-anime-dir" placeholder="E:\\Descargas">
-      <button class="btn btn-secondary" onclick="browseAnimeFolder()">📁 Examinar...</button>
-      <button class="btn btn-primary" onclick="loadSeriesCatalog()">🔄 Cargar Series</button>
+    <div class="card-title">💾 Ubicación de Medios (Disco 8TB en Proxmox)</div>
+    <div class="grid-2">
+      <div>
+        <label style="font-size:12px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:6px;">
+          Carpeta de Animes / Series (1080p Nyaa):
+        </label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="cfg-anime-dir" placeholder="/data/tvshows">
+          <button class="btn btn-secondary btn-sm" onclick="openFsBrowser('anime')">📁 Explorar</button>
+        </div>
+      </div>
+      <div>
+        <label style="font-size:12px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:6px;">
+          Carpeta de Descargas / Telegram (Audio Latino):
+        </label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="cfg-dub-dir" placeholder="/data/downloads">
+          <button class="btn btn-secondary btn-sm" onclick="openFsBrowser('dub')">📁 Explorar</button>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:14px; text-align:right;">
+      <button class="btn btn-primary btn-sm" onclick="saveAndReload()">💾 Guardar y Cargar Catálogo</button>
     </div>
   </div>
 
@@ -287,7 +337,7 @@ HTML_PAGE = """<!DOCTYPE html>
       <select id="series-select" onchange="onSeriesSelected()">
         <option value="">-- Seleccionar Serie --</option>
       </select>
-      <button class="btn btn-secondary btn-sm" onclick="loadSeriesCatalog()">🔄 Refrescar</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadSeriesCatalog()">🔄 Refrescar Series</button>
     </div>
 
     <div class="table-container" style="margin-top:16px;">
@@ -297,7 +347,7 @@ HTML_PAGE = """<!DOCTYPE html>
             <th style="width:70px;">Cap</th>
             <th>Archivo de Nyaa (1080p)</th>
             <th style="width:230px;">Pistas Detectadas</th>
-            <th>Archivo con Audio Latino (Telegram)</th>
+            <th>Archivo con Audio Latino (Telegram / Descargas)</th>
             <th style="width:140px; text-align:right;">Acción</th>
           </tr>
         </thead>
@@ -309,11 +359,28 @@ HTML_PAGE = """<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Modal de Progreso de Sincronización -->
-<div id="sync-modal">
+<!-- Modal: Explorador de Archivos en Proxmox -->
+<div id="fs-modal" class="modal-overlay">
+  <div class="modal-box">
+    <h3 style="font-size:16px; margin-bottom:6px;" id="fs-modal-title">📁 Explorador de Disco (Proxmox)</h3>
+    <div style="font-size:12px; color:var(--primary); font-family:monospace; margin-bottom:8px;" id="fs-cur-path">/data</div>
+    
+    <div class="fs-list" id="fs-items-container">
+      <div style="padding:16px; text-align:center; color:var(--text-muted);">Cargando archivos...</div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+      <button class="btn btn-secondary btn-sm" onclick="closeFsModal()">Cancelar</button>
+      <button class="btn btn-success btn-sm" id="fs-select-dir-btn" onclick="selectCurrentFsDir()">Seleccionar Esta Carpeta</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Progreso de Sincronización -->
+<div id="sync-modal" class="modal-overlay">
   <div class="modal-box">
     <h3 id="modal-title" style="margin-bottom:8px; font-size:18px;">⚡ Sincronizando Audio...</h3>
-    <p id="modal-desc" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Analizando correlación de audio MFCC...</p>
+    <p id="modal-desc" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Analizando correlación de audio FFT...</p>
     
     <div class="progress-bar-wrap">
       <div class="progress-bar-fill"></div>
@@ -330,6 +397,8 @@ HTML_PAGE = """<!DOCTYPE html>
 <script>
 let currentConfig = {};
 let currentEpisodes = [];
+let fsTargetInput = null;
+let currentFsBrowsePath = '/data';
 
 window.addEventListener('DOMContentLoaded', async () => {
   await loadConfig();
@@ -339,21 +408,19 @@ window.addEventListener('DOMContentLoaded', async () => {
 async function loadConfig() {
   const res = await fetch('/api/config');
   currentConfig = await res.json();
-  document.getElementById('cfg-anime-dir').value = currentConfig.anime_root_dir || 'E:\\\\Descargas';
+  document.getElementById('cfg-anime-dir').value = currentConfig.anime_root_dir || '/data/tvshows';
+  document.getElementById('cfg-dub-dir').value = currentConfig.telegram_root_dir || '/data/downloads';
 }
 
-async function browseAnimeFolder() {
-  const res = await fetch('/api/browse_dir', { method: 'POST' });
-  const data = await res.json();
-  if (data.path) {
-    document.getElementById('cfg-anime-dir').value = data.path;
-    await fetch('/api/config', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ anime_root_dir: data.path })
-    });
-    loadSeriesCatalog();
-  }
+async function saveAndReload() {
+  const animeDir = document.getElementById('cfg-anime-dir').value.trim();
+  const dubDir = document.getElementById('cfg-dub-dir').value.trim();
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ anime_root_dir: animeDir, telegram_root_dir: dubDir })
+  });
+  await loadSeriesCatalog();
 }
 
 async function loadSeriesCatalog() {
@@ -380,7 +447,9 @@ async function loadSeriesCatalog() {
 
 async function onSeriesSelected() {
   const sPath = document.getElementById('series-select').value;
+  const dubDir = document.getElementById('cfg-dub-dir').value.trim();
   const tbody = document.getElementById('episodes-tbody');
+  
   if (!sPath) {
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">Selecciona una serie arriba para listar los episodios.</td></tr>';
     return;
@@ -388,7 +457,7 @@ async function onSeriesSelected() {
   tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">Analizando pistas de los episodios con MKVToolNix...</td></tr>';
 
   try {
-    const res = await fetch('/api/episodes?path=' + encodeURIComponent(sPath));
+    const res = await fetch(`/api/episodes?path=${encodeURIComponent(sPath)}&dub_dir=${encodeURIComponent(dubDir)}`);
     const data = await res.json();
     currentEpisodes = data.episodes || [];
 
@@ -436,8 +505,8 @@ function renderEpisodesTable() {
         </td>
         <td>
           <div class="dub-input-group">
-            <input type="text" id="dub-path-${idx}" placeholder="Ruta del video/audio de Telegram..." value="${ep.suggested_dub || ''}">
-            <button class="btn btn-secondary btn-sm" onclick="browseDubFile(${idx})">📂</button>
+            <input type="text" id="dub-path-${idx}" placeholder="/data/downloads/archivo.mp4" value="${ep.suggested_dub || ''}">
+            <button class="btn btn-secondary btn-sm" onclick="pickDubFileForEp(${idx})">📁</button>
           </div>
         </td>
         <td style="text-align:right;">
@@ -450,12 +519,81 @@ function renderEpisodesTable() {
   }).join('');
 }
 
-async function browseDubFile(idx) {
-  const res = await fetch('/api/browse_file', { method: 'POST' });
-  const data = await res.json();
-  if (data.path) {
-    document.getElementById(`dub-path-${idx}`).value = data.path;
+// Explorador de archivos del servidor Proxmox
+function openFsBrowser(type) {
+  fsTargetInput = (type === 'anime') ? 'cfg-anime-dir' : 'cfg-dub-dir';
+  document.getElementById('fs-select-dir-btn').style.display = 'inline-block';
+  document.getElementById('fs-modal-title').innerText = '📁 Seleccionar Carpeta en Proxmox';
+  const startPath = document.getElementById(fsTargetInput).value.trim() || '/data';
+  loadFsPath(startPath);
+  document.getElementById('fs-modal').style.display = 'flex';
+}
+
+function pickDubFileForEp(idx) {
+  fsTargetInput = `dub-path-${idx}`;
+  document.getElementById('fs-select-dir-btn').style.display = 'none';
+  document.getElementById('fs-modal-title').innerText = '🎵 Seleccionar Archivo de Doblaje Latino';
+  const startPath = document.getElementById('cfg-dub-dir').value.trim() || '/data/downloads';
+  loadFsPath(startPath);
+  document.getElementById('fs-modal').style.display = 'flex';
+}
+
+async function loadFsPath(dirPath) {
+  currentFsBrowsePath = dirPath;
+  document.getElementById('fs-cur-path').innerText = dirPath;
+  const container = document.getElementById('fs-items-container');
+  container.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted);">Cargando...</div>';
+
+  try {
+    const res = await fetch('/api/browse_fs?path=' + encodeURIComponent(dirPath));
+    const data = await res.json();
+    const items = data.items || [];
+    
+    let html = '';
+    if (data.parent) {
+      html += `<div class="fs-item" onclick="loadFsPath('${data.parent.replace(/'/g, "\\'")}')">
+        <span style="font-size:16px;">⬆️</span> <strong>.. (Carpeta Superior)</strong>
+      </div>`;
+    }
+
+    html += items.map(item => {
+      const icon = item.is_dir ? '📁' : (item.name.endsWith('.mkv') || item.name.endsWith('.mp4') ? '🎬' : '📄');
+      const action = item.is_dir 
+        ? `loadFsPath('${item.path.replace(/'/g, "\\'")}')`
+        : `selectFsItem('${item.path.replace(/'/g, "\\'")}')`;
+      return `
+        <div class="fs-item" onclick="${action}">
+          <span style="font-size:16px;">${icon}</span>
+          <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            <strong style="color:${item.is_dir ? '#38bdf8' : '#f1f5f9'};">${item.name}</strong>
+            ${item.size ? `<span style="font-size:11px; color:#64748b; margin-left:8px;">(${item.size})</span>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = html || '<div style="padding:16px; text-align:center; color:var(--text-muted);">Carpeta vacía</div>';
+  } catch (err) {
+    container.innerHTML = `<div style="padding:16px; text-align:center; color:var(--danger);">${err.message}</div>`;
   }
+}
+
+function selectFsItem(filePath) {
+  if (fsTargetInput) {
+    document.getElementById(fsTargetInput).value = filePath;
+  }
+  closeFsModal();
+}
+
+function selectCurrentFsDir() {
+  if (fsTargetInput) {
+    document.getElementById(fsTargetInput).value = currentFsBrowsePath;
+  }
+  closeFsModal();
+}
+
+function closeFsModal() {
+  document.getElementById('fs-modal').style.display = 'none';
 }
 
 async function startSyncJob(idx) {
@@ -464,11 +602,10 @@ async function startSyncJob(idx) {
   const dubPath = dubInput.value.trim();
 
   if (!dubPath) {
-    alert('Por favor selecciona o escribe la ruta del archivo con audio en español (Telegram).');
+    alert('Por favor selecciona o escribe la ruta del archivo con audio en español.');
     return;
   }
 
-  // Abrir modal
   const modal = document.getElementById('sync-modal');
   const logs = document.getElementById('modal-logs');
   const title = document.getElementById('modal-title');
@@ -478,7 +615,7 @@ async function startSyncJob(idx) {
   modal.style.display = 'flex';
   closeBtn.style.display = 'none';
   title.innerText = `⚡ Sincronizando ${ep.name}`;
-  desc.innerText = 'Calculando correlación acústica de MFCCs con FFmpeg y mkvmerge...';
+  desc.innerText = 'Calculando correlación acústica en Proxmox con FFmpeg y mkvmerge...';
   logs.innerText = `Iniciando proceso...\nBase: ${ep.name}\nDoblaje: ${dubPath}\n`;
 
   try {
@@ -495,9 +632,8 @@ async function startSyncJob(idx) {
     if (result.status === 'ok') {
       title.innerText = '✅ ¡Sincronización Exitosa!';
       desc.innerText = `Desfase: ${result.offset_sec > 0 ? '+' : ''}${result.offset_sec}s (${result.delay_ms} ms) | Confianza: ${result.score.toFixed(2)}`;
-      logs.innerText += `\n[OK] Desfase temporal: ${result.delay_ms} ms\n[OK] Pista de audio inyectada con éxito.\nArchivo creado:\n-> ${result.output_file}\n`;
+      logs.innerText += `\n[OK] Desfase temporal detectado: ${result.delay_ms} ms\n[OK] Pista de audio inyectada con éxito sin perder calidad.\nArchivo creado:\n-> ${result.output_file}\n`;
       closeBtn.style.display = 'inline-block';
-      // Refrescar lista de episodios
       setTimeout(onSeriesSelected, 1500);
     } else {
       title.innerText = '❌ Error en la Sincronización';
@@ -536,7 +672,7 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         clean_path = parsed.path
 
-        if clean_path == "/" or clean_path == "/index.html":
+        if clean_path in ("/", "/index.html"):
             html_bytes = HTML_PAGE.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -547,6 +683,32 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
 
         if clean_path == "/api/config":
             self.send_json(load_config())
+            return
+
+        if clean_path == "/api/browse_fs":
+            qs = urllib.parse.parse_qs(parsed.query)
+            target = qs.get("path", ["/data"])[0].strip() or "/data"
+            p = Path(target)
+            if not p.exists():
+                p = Path("/data") if Path("/data").exists() else Path.home()
+
+            items = []
+            parent = str(p.parent) if p.parent != p else None
+
+            try:
+                for entry in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                    if entry.name.startswith("."):
+                        continue
+                    if entry.is_dir():
+                        items.append({"name": entry.name, "path": str(entry), "is_dir": True})
+                    elif entry.suffix.lower() in (".mkv", ".mp4", ".m4v", ".webm", ".aac", ".m4a"):
+                        sz = f"{round(entry.stat().st_size / (1024*1024), 1)} MB"
+                        items.append({"name": entry.name, "path": str(entry), "is_dir": False, "size": sz})
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=500)
+                return
+
+            self.send_json({"path": str(p), "parent": parent, "items": items})
             return
 
         if clean_path == "/api/series":
@@ -566,18 +728,30 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
         if clean_path == "/api/episodes":
             qs = urllib.parse.parse_qs(parsed.query)
             target_path = qs.get("path", [""])[0].strip()
+            dub_dir = qs.get("dub_dir", [""])[0].strip() or load_config().get("telegram_root_dir", "")
             episodes = []
-            
+
+            # Escanear dub_dir para sugerencias automáticas de capítulos
+            dub_map = {}
+            if dub_dir and os.path.exists(dub_dir):
+                exts = {".mkv", ".mp4", ".m4v", ".webm", ".aac", ".m4a"}
+                for root, _, files in os.walk(dub_dir):
+                    for f in files:
+                        if Path(f).suffix.lower() in exts:
+                            ep_num = extract_episode_number(f)
+                            if ep_num is not None and ep_num not in dub_map:
+                                dub_map[ep_num] = os.path.join(root, f)
+
             if target_path and os.path.exists(target_path):
                 files_to_check = []
                 if os.path.isfile(target_path):
                     files_to_check.append(Path(target_path))
                 else:
-                    p = Path(target_path)
                     exts = {".mkv", ".mp4", ".m4v"}
-                    for f in sorted(p.iterdir()):
-                        if f.is_file() and f.suffix.lower() in exts:
-                            files_to_check.append(f)
+                    for root, _, files in os.walk(target_path):
+                        for f in sorted(files):
+                            if Path(f).suffix.lower() in exts:
+                                files_to_check.append(Path(root) / f)
 
                 for f in files_to_check:
                     try:
@@ -608,6 +782,7 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
 
                     sz_mb = round(f.stat().st_size / (1024 * 1024), 1)
                     ep_num = extract_episode_number(f.name)
+                    suggested_dub = dub_map.get(ep_num, "")
 
                     episodes.append({
                         "name": f.name,
@@ -616,7 +791,8 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
                         "ep_num": ep_num,
                         "has_jp_audio": has_jp_audio,
                         "has_es_sub": has_es_sub,
-                        "has_latino_audio": has_latino_audio
+                        "has_latino_audio": has_latino_audio,
+                        "suggested_dub": suggested_dub
                     })
 
             self.send_json({"episodes": episodes})
@@ -641,16 +817,6 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
             self.send_json({"status": "ok", "config": cfg})
             return
 
-        if clean_path == "/api/browse_dir":
-            selected = open_folder_dialog_windows(payload.get("initial", ""))
-            self.send_json({"path": selected})
-            return
-
-        if clean_path == "/api/browse_file":
-            selected = open_file_dialog_windows(payload.get("initial", ""))
-            self.send_json({"path": selected})
-            return
-
         if clean_path == "/api/sync":
             nyaa_file = payload.get("nyaa_file", "").strip()
             dub_file = payload.get("dub_file", "").strip()
@@ -666,7 +832,7 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
             try:
                 # 1. Pista de audio
                 dub_audio_id = get_audio_track_id(dub_file, prefer_lang="spa")
-                
+
                 # 2. Desfase
                 offset_sec, score = calculate_offset(nyaa_file, dub_file, trim=trim)
                 delay_ms = int(round(offset_sec * 1000))
@@ -706,20 +872,21 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
 
-def run_web_server(port=PORT, open_browser=True):
+def run_web_server(port=PORT, open_browser=False):
     check_prerequisites()
     server_address = ("0.0.0.0", port)
     httpd = HTTPServer(server_address, DubSyncWebHandler)
-    url = f"http://localhost:{port}"
+    url = f"http://0.0.0.0:{port}"
     print("\n" + "=" * 60)
-    print(f"🎙️ AutoDub Sync Studio Web UI disponible en:")
-    print(f"   -> {url}")
+    print(f"🎙️ AutoDub Studio Proxmox disponible en:")
+    print(f"   -> http://192.168.1.125:{port} (Red Local)")
+    print(f"   -> http://localhost:{port}")
     print("=" * 60 + "\n")
 
-    if open_browser:
+    if open_browser and IS_WINDOWS:
         try:
             import webbrowser
-            webbrowser.open(url)
+            webbrowser.open(f"http://localhost:{port}")
         except Exception:
             pass
 

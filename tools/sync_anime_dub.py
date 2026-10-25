@@ -3,9 +3,10 @@
 """
 sync_anime_dub.py - Sincronizador Automático de Audio Latino para Anime
 
-Permite transferir pistas de audio latino (por ejemplo ripeadas de Telegram a 720p)
+Permite transferir pistas de audio latino (ripeadas de Telegram o Web-DL 720p)
 a versiones de alta calidad (1080p / BDRip de Nyaa) calculando el desfase exacto
-en milisegundos mediante correlación acústica MFCC y muxeando sin pérdida con MKVToolNix.
+en milisegundos mediante correlación cruzada acústica de envolvente (FFT/SciPy)
+y muxeando sin pérdida con MKVToolNix.
 """
 
 import os
@@ -17,11 +18,8 @@ import argparse
 import subprocess
 from pathlib import Path
 
-try:
-    from audio_offset_finder.audio_offset_finder import find_offset_between_files
-except ImportError:
-    print("[ERROR] Falta 'audio-offset-finder'. Instálalo con: pip install audio-offset-finder", file=sys.stderr)
-    sys.exit(1)
+import numpy as np
+from scipy.signal import fftconvolve, correlation_lags
 
 
 def find_binary(name: str, fallback_paths: list = None) -> str:
@@ -39,14 +37,14 @@ def find_binary(name: str, fallback_paths: list = None) -> str:
 MKVMERGE_BIN = find_binary("mkvmerge", [
     r"C:\Program Files\MKVToolNix\mkvmerge.exe",
     r"C:\Program Files (x86)\MKVToolNix\mkvmerge.exe",
-    r"/usr/bin/mkvmerge",
-    r"/usr/local/bin/mkvmerge",
+    "/usr/bin/mkvmerge",
+    "/usr/local/bin/mkvmerge",
 ])
 
 FFMPEG_BIN = find_binary("ffmpeg", [
     r"C:\ffmpeg\bin\ffmpeg.exe",
-    r"/usr/bin/ffmpeg",
-    r"/usr/local/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
 ])
 
 
@@ -54,9 +52,9 @@ def check_prerequisites():
     """Verifica que mkvmerge y ffmpeg estén disponibles."""
     missing = []
     if not MKVMERGE_BIN:
-        missing.append("MKVToolNix (mkvmerge) no encontrado. Descárgalo o instálalo con: winget install MoritzBunkus.MKVToolNix")
+        missing.append("MKVToolNix (mkvmerge) no encontrado. Instálalo con 'apk add mkvtoolnix' (Alpine) o 'winget install MoritzBunkus.MKVToolNix' (Windows).")
     if not FFMPEG_BIN:
-        missing.append("FFmpeg no encontrado. Instálalo con: winget install Gyan.FFmpeg.Essentials")
+        missing.append("FFmpeg no encontrado. Instálalo con 'apk add ffmpeg' (Alpine) o 'winget install Gyan.FFmpeg.Essentials' (Windows).")
     if missing:
         for m in missing:
             print(f"[!] {m}", file=sys.stderr)
@@ -90,25 +88,50 @@ def get_audio_track_id(file_path: str, prefer_lang: str = "spa") -> int:
     return audio_tracks[0]["id"]
 
 
-def calculate_offset(ref_file: str, dub_file: str, trim: int = 360) -> tuple[float, float]:
+def calculate_offset(ref_file: str, dub_file: str, trim: int = 360, sr: int = 8000) -> tuple[float, float]:
     """
-    Calcula el desfase temporal entre el archivo de referencia (Nyaa) y el doblaje (Telegram).
-    Retorna (offset_seconds, standard_score/confianza).
+    Calcula el desfase temporal entre el video de referencia (Nyaa) y el doblaje (Telegram).
+    Utiliza correlación cruzada FFT sobre la envolvente de amplitud de audio a 100 Hz.
+    Retorna (offset_seconds, z_score_confidence).
     """
+    def extract_pcm(filepath, duration):
+        cmd = [
+            FFMPEG_BIN, "-y", "-loglevel", "error",
+            "-i", str(filepath),
+            "-ss", "0", "-t", str(duration),
+            "-vn", "-ac", "1", "-ar", str(sr),
+            "-f", "s16le", "pipe:1"
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True)
+        return np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32)
+
     print(f"[*] Analizando huellas acústicas (primeros {trim}s)...")
-    res = find_offset_between_files(
-        ref_file,
-        dub_file,
-        trim=trim,
-        fs=8000,
-        hop_length=128,
-        win_length=256,
-        nfft=512,
-        max_frames=4000  # ventana de búsqueda de hasta ~64s
-    )
-    offset = res["time_offset"]
-    score = res["standard_score"]
-    return offset, score
+    s1 = extract_pcm(ref_file, trim)
+    s2 = extract_pcm(dub_file, trim)
+
+    if len(s1) < sr * 5 or len(s2) < sr * 5:
+        raise ValueError("Audio insuficiente para analizar la sincronización (mínimo 5 segundos).")
+
+    # Envolvente a 100 Hz (ventana de 80 muestras a 8000 Hz)
+    win = int(sr / 100)
+    e1 = np.convolve(np.abs(s1), np.ones(win) / win, mode="valid")[::win]
+    e2 = np.convolve(np.abs(s2), np.ones(win) / win, mode="valid")[::win]
+
+    e1 -= np.mean(e1)
+    e2 -= np.mean(e2)
+
+    corr = fftconvolve(e1, e2[::-1], mode="full")
+    lags = correlation_lags(len(e1), len(e2), mode="full")
+
+    best_idx = np.argmax(corr)
+    best_lag = lags[best_idx]
+    offset_sec = best_lag / 100.0
+
+    mean_c = np.mean(corr)
+    std_c = np.std(corr)
+    z_score = float((corr[best_idx] - mean_c) / (std_c + 1e-10))
+
+    return offset_sec, z_score
 
 
 def sync_single_episode(nyaa_file: str, dub_file: str, output_file: str,
@@ -129,7 +152,7 @@ def sync_single_episode(nyaa_file: str, dub_file: str, output_file: str,
         return False
 
     print("\n" + "=" * 60)
-    print(f"Procesando:")
+    print("Procesando:")
     print(f"  • Base (Nyaa 1080p): {nyaa_path.name}")
     print(f"  • Audio (Telegram):  {dub_path.name}")
     print("=" * 60)
@@ -152,7 +175,7 @@ def sync_single_episode(nyaa_file: str, dub_file: str, output_file: str,
 
     # 3. Preparar comando mkvmerge
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     cmd = [
         MKVMERGE_BIN,
         "-o", str(out_path),
@@ -175,11 +198,11 @@ def sync_single_episode(nyaa_file: str, dub_file: str, output_file: str,
 
     print(f"[*] Muxeando con MKVToolNix en: {out_path.name}...")
     run_res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if run_res.returncode not in (0, 1):  # 0=ok, 1=warnings (generalmente diferencias menores de headers)
+    if run_res.returncode not in (0, 1):  # 0=ok, 1=warnings menores
         print(f"[ERROR] Error al muxear:\n{run_res.stderr}", file=sys.stderr)
         return False
 
-    print(f"[✓] ¡Completado exitosamente! Archivo creado:")
+    print("[✓] ¡Completado exitosamente! Archivo creado:")
     print(f"    -> {out_path} ({round(out_path.stat().st_size / (1024*1024), 1)} MB)\n")
     return True
 
@@ -250,8 +273,7 @@ def sync_batch_directory(nyaa_dir: str, dub_dir: str, output_dir: str,
     for ep in common_eps:
         n_file = nyaa_map[ep]
         d_file = dub_map[ep]
-        
-        # Nombre de salida: nombre original de Nyaa agregando [Dual Audio] antes de la extensión
+
         out_name = f"{n_file.stem} [Dual Audio].mkv"
         out_file = out_path / out_name
 
@@ -275,14 +297,14 @@ def main():
     # Modo archivo único
     parser.add_argument("nyaa_video", nargs="?", help="Video de Nyaa (1080p / BD / Web-DL)")
     parser.add_argument("dub_video", nargs="?", help="Video o audio con doblaje latino (Telegram 720p)")
-    
+
     # Salida
     parser.add_argument("-o", "--output", help="Archivo de salida (modo archivo) o directorio de salida (modo carpeta)")
-    
+
     # Modo batch (temporada completa)
     parser.add_argument("--nyaa-dir", help="Directorio con videos de Nyaa")
     parser.add_argument("--dub-dir", help="Directorio con videos/audios de Telegram")
-    
+
     # Opciones de audio y ajuste
     parser.add_argument("--trim", type=int, default=360, help="Segundos a analizar para correlación (defecto: 360s = 6 min)")
     parser.add_argument("--lang", default="spa", help="Código de idioma para mkvmerge (defecto: spa)")
