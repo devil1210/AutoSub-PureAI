@@ -2297,6 +2297,9 @@ HTML_DASHBOARD = """<!DOCTYPE html>
       <button class="nav-tab" id="tab-btn-settings" onclick="switchTab('settings')">
         <span>⚙️</span> Configuración
       </button>
+      <a href="http://192.168.1.125:5056" target="_blank" class="nav-tab" style="text-decoration:none; color:var(--text); background:rgba(56, 189, 248, 0.1); border:1px solid rgba(56, 189, 248, 0.25);">
+        <span>🎙️</span> Doblaje Latino
+      </a>
     </nav>
   </header>
 
