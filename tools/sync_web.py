@@ -973,7 +973,178 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
                 self.send_json({"status": "error", "message": str(e)}, status=500)
             return
 
+        if clean_path == "/api/sonarr_webhook":
+            res = handle_sonarr_webhook(payload)
+            status_code = 200 if res.get("status") in ("ok", "ignored", "partial") else 500
+            self.send_json(res, status=status_code)
+            return
+
         self.send_error(404, "Not Found")
+
+
+def handle_sonarr_webhook(payload: dict) -> dict:
+    """
+    Procesa eventos de Sonarr (On Download / On Upgrade).
+    Cuando Sonarr descarga o actualiza un episodio con pista en Español Latino (es-419 / spa):
+    1. Detecta la pista de audio latino oficial.
+    2. Localiza la versión ligera (Judas/HEVC x265) en la papelera (/data/.recycle), /data/downloads o tvshows.
+    3. Sincroniza al milisegundo e inyecta la pista de audio en la versión ligera.
+    4. Reemplaza el archivo pesado importado por el ligero con Audio Dual, ahorrando espacio inmediatamente.
+    """
+    event_type = payload.get("eventType")
+    print(f"\n[Sonarr Webhook] Recibido evento: {event_type}")
+
+    if event_type == "Test":
+        return {"status": "ok", "message": "AutoDub webhook test successful"}
+
+    if event_type not in ("Download", "Upgrade"):
+        return {"status": "ignored", "reason": f"Event type {event_type} not handled"}
+
+    episode_file = payload.get("episodeFile", {})
+    new_file_path = episode_file.get("path")
+    if not new_file_path or not os.path.exists(new_file_path):
+        return {"status": "ignored", "reason": "No episode file path found on disk"}
+
+    new_size_mb = os.path.getsize(new_file_path) / (1024 * 1024)
+    print(f"[Sonarr Webhook] Nuevo archivo: {new_file_path} ({round(new_size_mb, 1)} MB)")
+
+    # 1. Comprobar pistas de audio en el nuevo archivo
+    try:
+        new_tracks = get_mkv_tracks(new_file_path)
+    except Exception as e:
+        return {"status": "error", "message": f"Error leyendo pistas de {new_file_path}: {e}"}
+
+    latino_track_id = None
+    latino_name = "Español Latino"
+    for t in new_tracks.get("tracks", []):
+        if t.get("type") == "audio":
+            props = t.get("properties", {})
+            lang = (props.get("language", "") or props.get("language_ietf", "")).lower()
+            name = (props.get("track_name", "")).lower()
+            if "lat" in name or "latino" in name or lang in ("es-419", "spa", "es"):
+                latino_track_id = t["id"]
+                if props.get("track_name"):
+                    latino_name = props.get("track_name")
+                break
+
+    if latino_track_id is None:
+        print("[Sonarr Webhook] El archivo nuevo no contiene audio en español latino. Omitiendo.")
+        return {"status": "ignored", "reason": "No Latin Spanish audio track found in imported file"}
+
+    print(f"[Sonarr Webhook] Pista de audio latino encontrada: ID {latino_track_id} ({latino_name})")
+
+    # Si ya es un archivo muy ligero (< 400 MB) no hace falta reemplazar video
+    if new_size_mb < 400:
+        print("[Sonarr Webhook] El archivo nuevo ya es ligero (< 400 MB). Nada que reemplazar.")
+        return {"status": "ok", "message": "File is already compact"}
+
+    # 2. Buscar candidato ligero (Judas / HEVC x265)
+    candidates = []
+
+    # A) deletedFiles (si Sonarr tiene configurado Recycle Bin)
+    for df in payload.get("deletedFiles", []):
+        p = df.get("path")
+        if p and os.path.exists(p):
+            candidates.append(p)
+
+    # B) Papelera de reciclaje común (/data/downloads/.recycle o /data/.recycle)
+    for r_dir in (Path("/data/downloads/.recycle"), Path("/data/.recycle")):
+        if r_dir.exists():
+            for root, _, files in os.walk(r_dir):
+                for f in files:
+                    if f.lower().endswith((".mkv", ".mp4")):
+                        candidates.append(os.path.join(root, f))
+
+    # C) /data/downloads (buscar Judas del mismo capítulo)
+    episodes = payload.get("episodes", [])
+    ep_num = episodes[0].get("episodeNumber") if episodes else extract_episode_number(os.path.basename(new_file_path))
+
+    downloads_dir = Path("/data/downloads")
+    if downloads_dir.exists():
+        for f in downloads_dir.iterdir():
+            if f.is_file() and f.suffix.lower() == ".mkv":
+                f_ep = extract_episode_number(f.name)
+                if f_ep == ep_num and any(k in f.name.lower() for k in ("judas", "x265", "hevc", "10bit")):
+                    candidates.append(str(f))
+
+    # D) Misma carpeta de la serie
+    series_dir = Path(new_file_path).parent
+    for f in series_dir.iterdir():
+        if f.is_file() and f.suffix.lower() == ".mkv" and str(f) != new_file_path:
+            f_ep = extract_episode_number(f.name)
+            if f_ep == ep_num and any(k in f.name.lower() for k in ("judas", "x265", "hevc")):
+                candidates.append(str(f))
+
+    # Seleccionar el mejor candidato ligero (entre 80 MB y 600 MB)
+    light_ref = None
+    for cand in candidates:
+        if os.path.exists(cand):
+            sz = os.path.getsize(cand) / (1024 * 1024)
+            if 80 <= sz <= 600:
+                light_ref = cand
+                break
+
+    if not light_ref:
+        msg = f"Audio latino detectado (pista {latino_track_id}), pero no se encontró versión ligera previa (Judas/x265)."
+        print(f"[Sonarr Webhook] {msg}")
+        return {"status": "partial", "message": msg}
+
+    print(f"[Sonarr Webhook] Versión ligera de referencia encontrada: {light_ref}")
+
+    # 3. Sincronización y Muxing
+    try:
+        offset_sec, score = calculate_offset(light_ref, new_file_path, trim=360)
+        delay_ms = int(round(offset_sec * 1000))
+        print(f"[Sonarr Webhook] Desfase calculado: {offset_sec:.3f}s ({delay_ms}ms), confianza Z: {score:.2f}")
+
+        tmp_out = f"{new_file_path}.tmp_autodub.mkv"
+        cmd = [
+            MKVMERGE_BIN,
+            "-o", tmp_out,
+            light_ref,
+            "--no-video",
+            "--no-subtitles",
+            "--no-buttons",
+            "--no-track-tags",
+            "--no-global-tags",
+            "--audio-tracks", str(latino_track_id),
+            "--sync", f"{latino_track_id}:{delay_ms}",
+            "--language", f"{latino_track_id}:spa",
+            "--track-name", f"{latino_track_id}:{latino_name}",
+            new_file_path
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if res.returncode not in (0, 1) or not os.path.exists(tmp_out):
+            raise RuntimeError(f"mkvmerge falló: {res.stderr}")
+
+        # 4. Reemplazar archivo pesado por el ligero con audio dual
+        shutil.move(tmp_out, new_file_path)
+        try:
+            os.chown(new_file_path, 1000, 1000)
+            os.chmod(new_file_path, 0o644)
+        except Exception:
+            pass
+
+        final_sz = round(os.path.getsize(new_file_path) / (1024 * 1024), 1)
+        print(f"[Sonarr Webhook] ¡Éxito! Archivo reemplazado: {round(new_size_mb, 1)} MB -> {final_sz} MB (Dual-Audio)")
+
+        return {
+            "status": "ok",
+            "action": "replaced_heavy_with_dual_audio",
+            "original_size_mb": round(new_size_mb, 1),
+            "optimized_size_mb": final_sz,
+            "offset_sec": round(offset_sec, 3),
+            "confidence_z": round(score, 2),
+            "light_ref_used": light_ref
+        }
+    except Exception as e:
+        print(f"[Sonarr Webhook] Error en proceso de reemplazo: {e}")
+        if os.path.exists(tmp_out):
+            try:
+                os.remove(tmp_out)
+            except Exception:
+                pass
+        return {"status": "error", "message": str(e)}
 
 
 def run_web_server(port=PORT, open_browser=False):
