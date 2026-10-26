@@ -10,6 +10,7 @@ Soporta subida directa de archivos desde el navegador del PC a Proxmox.
 """
 
 import os
+import re
 import sys
 import json
 import uuid
@@ -981,9 +982,14 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
             return
 
         if clean_path == "/api/sonarr_webhook":
-            res = handle_sonarr_webhook(payload)
-            status_code = 200 if res.get("status") in ("ok", "ignored", "partial") else 500
-            self.send_json(res, status=status_code)
+            if payload.get("eventType") == "Test":
+                self.send_json({"status": "ok", "message": "AutoDub webhook test successful"})
+                return
+
+            # Responder de inmediato a Sonarr (200 OK) para que libere la cola y complete el hardlink sin demoras.
+            # La sincronización acústica pesada se ejecuta en un hilo en segundo plano.
+            threading.Thread(target=handle_sonarr_webhook, args=(payload,), daemon=True).start()
+            self.send_json({"status": "queued", "message": "AutoDub sync job queued in background"})
             return
 
         self.send_error(404, "Not Found")
@@ -991,12 +997,8 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
 
 def handle_sonarr_webhook(payload: dict) -> dict:
     """
-    Procesa eventos de Sonarr (On Download / On Upgrade).
-    Cuando Sonarr descarga o actualiza un episodio con pista en Español Latino (es-419 / spa):
-    1. Detecta la pista de audio latino oficial.
-    2. Localiza la versión ligera (Judas/HEVC x265) en la papelera (/data/.recycle), /data/downloads o tvshows.
-    3. Sincroniza al milisegundo e inyecta la pista de audio en la versión ligera.
-    4. Reemplaza el archivo pesado importado por el ligero con Audio Dual, ahorrando espacio inmediatamente.
+    Procesa eventos de Sonarr (On File Import / On File Upgrade) en segundo plano.
+    Asegura aislamiento total por serie, temporada y capítulo, evitando mezclar series distintas.
     """
     event_type = payload.get("eventType", "")
     print(f"\n[Sonarr Webhook] Recibido evento: '{event_type}'")
@@ -1004,7 +1006,6 @@ def handle_sonarr_webhook(payload: dict) -> dict:
     if event_type == "Test":
         return {"status": "ok", "message": "AutoDub webhook test successful"}
 
-    # Sonarr v3 usa 'Download' y 'Upgrade'; Sonarr v4 usa 'Download', 'EpisodeFileImport', 'FileImport', 'FileUpgrade', etc.
     valid_events = ("Download", "Upgrade", "EpisodeFileImport", "FileImport", "FileUpgrade", "Import")
     if event_type not in valid_events:
         print(f"[Sonarr Webhook] Evento '{event_type}' omitido (no es importación de archivo).")
@@ -1017,6 +1018,48 @@ def handle_sonarr_webhook(payload: dict) -> dict:
 
     new_size_mb = os.path.getsize(new_file_path) / (1024 * 1024)
     print(f"[Sonarr Webhook] Nuevo archivo: {new_file_path} ({round(new_size_mb, 1)} MB)")
+
+    # Metadatos de la serie para aislamiento estricto
+    series_info = payload.get("series", {})
+    series_title = series_info.get("title", "").strip().lower()
+    series_path = series_info.get("path", "").strip().lower()
+    series_folder_name = os.path.basename(series_path) if series_path else series_title
+
+    # Palabras clave de la serie para búsqueda en /downloads (palabras de >= 4 caracteres)
+    title_words = [w.lower() for w in re.findall(r'[a-zA-Z0-9]+', series_title) if len(w) >= 4]
+
+    episodes = payload.get("episodes", [])
+    season_num = episodes[0].get("seasonNumber") if episodes else None
+    db_ep_num = episodes[0].get("episodeNumber") if episodes else None
+    file_ep_num = extract_episode_number(os.path.basename(new_file_path))
+    target_eps = {ep for ep in (db_ep_num, file_ep_num) if ep is not None}
+
+    def is_candidate_matching_series(cand_path):
+        p_str = str(cand_path).lower()
+        # 1. Si está dentro de la carpeta de la serie en tvshows
+        if series_path and series_path in p_str:
+            return True
+        # 2. Si está en .recycle bajo la subcarpeta de la serie
+        if ".recycle" in p_str and (series_folder_name in p_str or any(w in p_str for w in title_words)):
+            return True
+        # 3. Si está en /data/downloads, debe coincidir con alguna palabra clave de la serie
+        if "/downloads" in p_str:
+            fname = os.path.basename(p_str).lower()
+            if any(w in fname for w in title_words):
+                return True
+        return False
+
+    def is_candidate_matching_season(cand_path):
+        if season_num is None:
+            return True
+        p_str = str(cand_path).lower()
+        s_match = re.search(r'season\s*(\d+)', p_str)
+        if s_match and int(s_match.group(1)) != season_num:
+            return False
+        s_match2 = re.search(r's(\d{1,2})e\d+', os.path.basename(cand_path), re.IGNORECASE)
+        if s_match2 and int(s_match2.group(1)) != season_num:
+            return False
+        return True
 
     def find_latino_audio(file_path):
         try:
@@ -1035,13 +1078,13 @@ def handle_sonarr_webhook(payload: dict) -> dict:
 
     new_latino_id, new_latino_name = find_latino_audio(new_file_path)
 
-    # Buscar candidatos en deletedFiles, papelera, downloads y carpeta de la serie
+    # Buscar candidatos filtrando estrictamente por la misma serie y temporada
     candidates = []
 
     # A) deletedFiles enviados por Sonarr
     for df in payload.get("deletedFiles", []):
         p = df.get("path")
-        if p and os.path.exists(p):
+        if p and os.path.exists(p) and is_candidate_matching_series(p) and is_candidate_matching_season(p):
             candidates.append(p)
 
     # B) Papelera de reciclaje común
@@ -1050,20 +1093,17 @@ def handle_sonarr_webhook(payload: dict) -> dict:
             for root, _, files in os.walk(r_dir):
                 for f in files:
                     if f.lower().endswith((".mkv", ".mp4")):
-                        candidates.append(os.path.join(root, f))
+                        full_p = os.path.join(root, f)
+                        if is_candidate_matching_series(full_p) and is_candidate_matching_season(full_p):
+                            candidates.append(full_p)
 
-    # C) /data/downloads y D) Misma carpeta de la serie
-    episodes = payload.get("episodes", [])
-    db_ep_num = episodes[0].get("episodeNumber") if episodes else None
-    file_ep_num = extract_episode_number(os.path.basename(new_file_path))
-    target_eps = {ep for ep in (db_ep_num, file_ep_num) if ep is not None}
-
+    # C) /data/downloads y D) Misma carpeta de la temporada
     for search_dir in (Path("/data/downloads"), Path(new_file_path).parent):
         if search_dir.exists():
             for f in search_dir.iterdir():
                 if f.is_file() and f.suffix.lower() == ".mkv" and str(f) != new_file_path:
                     f_ep = extract_episode_number(f.name)
-                    if f_ep in target_eps:
+                    if f_ep in target_eps and is_candidate_matching_series(str(f)) and is_candidate_matching_season(str(f)):
                         candidates.append(str(f))
 
     # Determinar qué archivo es la base de video y qué archivo es la fuente de doblaje
@@ -1100,19 +1140,23 @@ def handle_sonarr_webhook(payload: dict) -> dict:
 
     if not light_ref or not dub_source or dub_audio_id is None:
         if new_latino_id is not None:
-            msg = f"Audio latino detectado en {new_file_path}, pero no se encontró versión ligera previa para reemplazar."
+            msg = f"Audio latino detectado en {new_file_path}, pero no se encontró versión ligera previa de la misma serie/temporada."
         else:
-            msg = f"El archivo nuevo es ligero ({round(new_size_mb, 1)} MB), pero no se encontró fuente con audio latino para inyectar."
+            msg = f"El archivo nuevo es ligero ({round(new_size_mb, 1)} MB), pero no se encontró fuente con audio latino de la misma serie."
         print(f"[Sonarr Webhook] {msg}")
         return {"status": "ignored", "reason": msg}
 
     print(f"[Sonarr Webhook] Sincronizando: Video base [{light_ref}] + Audio latino [{dub_source}] (Pista {dub_audio_id}: {dub_audio_name})")
 
-    # Sincronización y Muxing
+    # Sincronización y Muxing con comprobación estricta de confianza acústica
     try:
         offset_sec, score = calculate_offset(light_ref, dub_source, trim=360)
         delay_ms = int(round(offset_sec * 1000))
         print(f"[Sonarr Webhook] Desfase calculado: {offset_sec:.3f}s ({delay_ms}ms), confianza Z: {score:.2f}")
+
+        if score < 3.5:
+            print(f"[Sonarr Webhook] ⚠️ Confianza acústica insuficiente (Z={score:.2f} < 3.5). Descartando para no mezclar audios erróneos.")
+            return {"status": "rejected", "reason": f"Acoustic confidence too low ({score:.2f})"}
 
         tmp_out = f"{new_file_path}.tmp_autodub.mkv"
         cmd = [
