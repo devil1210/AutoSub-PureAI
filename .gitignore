@@ -1,4 +1,4 @@
-﻿# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *.class
@@ -26,3 +26,5 @@ env/
 autosub_config.json
 autosub_queue.json
 autosub_history.json
+*telegram_config.json
+*sync_web_config.json

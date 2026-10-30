@@ -36,6 +36,15 @@ except ImportError:
         sync_single_episode, extract_episode_number
     )
 
+try:
+    from tools.telegram_notifier import send_episode_rich_notification
+except ImportError:
+    try:
+        from telegram_notifier import send_episode_rich_notification
+    except ImportError:
+        def send_episode_rich_notification(file_path, payload=None):
+            return False
+
 PORT = 5056
 CONFIG_FILE = Path(__file__).parent / "sync_web_config.json"
 
@@ -1144,11 +1153,20 @@ def handle_sonarr_webhook(payload: dict) -> dict:
         else:
             msg = f"El archivo nuevo es ligero ({round(new_size_mb, 1)} MB), pero no se encontró fuente con audio latino de la misma serie."
         print(f"[Sonarr Webhook] {msg}")
-        return {"status": "ignored", "reason": msg}
+
+        # Notificar a Telegram la llegada del episodio importado
+        time.sleep(2)
+        try:
+            send_episode_rich_notification(new_file_path, payload)
+        except Exception as ex:
+            print(f"[Sonarr Webhook] Error enviando notificacion RichMessage: {ex}")
+
+        return {"status": "ok", "reason": msg, "action": "imported_as_is"}
 
     print(f"[Sonarr Webhook] Sincronizando: Video base [{light_ref}] + Audio latino [{dub_source}] (Pista {dub_audio_id}: {dub_audio_name})")
 
     # Sincronización y Muxing con comprobación estricta de confianza acústica
+    tmp_out = None
     try:
         offset_sec, score = calculate_offset(light_ref, dub_source, trim=360)
         delay_ms = int(round(offset_sec * 1000))
@@ -1197,6 +1215,12 @@ def handle_sonarr_webhook(payload: dict) -> dict:
         final_sz = round(os.path.getsize(new_file_path) / (1024 * 1024), 1)
         print(f"[Sonarr Webhook] ¡Éxito! Archivo final optimizado: {final_sz} MB con Audio Dual en {new_file_path}")
 
+        # Notificar a Telegram la finalización exitosa del Dual Audio
+        try:
+            send_episode_rich_notification(new_file_path, payload)
+        except Exception as ex:
+            print(f"[Sonarr Webhook] Error enviando notificacion RichMessage: {ex}")
+
         return {
             "status": "ok",
             "action": "synchronized_dual_audio",
@@ -1206,7 +1230,7 @@ def handle_sonarr_webhook(payload: dict) -> dict:
         }
     except Exception as e:
         print(f"[Sonarr Webhook] Error en proceso: {e}")
-        if os.path.exists(tmp_out):
+        if tmp_out and os.path.exists(tmp_out):
             try:
                 os.remove(tmp_out)
             except Exception:
