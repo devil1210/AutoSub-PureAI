@@ -165,9 +165,20 @@ def sync_single_episode(nyaa_file: str, dub_file: str, output_file: str,
     offset_sec, score = calculate_offset(str(nyaa_path), str(dub_path), trim=trim)
     delay_ms = int(round(offset_sec * 1000))
 
-    score_desc = "Excelente" if score >= 6.0 else ("Buena" if score >= 3.5 else "Baja (revisar resultado)")
+    score_desc = "Excelente" if score >= 6.0 else ("Buena" if score >= 4.0 else "Baja (revisar resultado)")
     print(f"[+] Desfase detectado: {offset_sec:+.3f}s ({delay_ms:+d} ms)")
     print(f"[+] Confianza del algoritmo: {score:.2f} [{score_desc}]")
+
+    # Filtro 1: Desfase temporal excesivo (desfases > ±45s indican fuentes de episodio incompatibles)
+    if abs(offset_sec) > 45.0:
+        print(f"[ERROR] Desfase temporal excesivo ({offset_sec:+.3f}s > ±45s). Probable falso positivo o episodio incorrecto. Abortando.", file=sys.stderr)
+        return False
+
+    # Filtro 2: Confianza acústica mínima
+    min_score = 4.0 if abs(offset_sec) <= 10.0 else 5.0
+    if score < min_score:
+        print(f"[ERROR] Confianza acústica insuficiente (Z={score:.2f} < {min_score}). Cancelando sincronización para evitar desincronización.", file=sys.stderr)
+        return False
 
     if dry_run:
         print("[DRY-RUN] No se creará el archivo de salida.")

@@ -19,6 +19,7 @@ import shutil
 import threading
 import subprocess
 import urllib.parse
+import urllib.request
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -45,8 +46,24 @@ except ImportError:
         def send_episode_rich_notification(file_path, payload=None):
             return False
 
+try:
+    from tools.nfo_manager import process_episode_nfo, process_series_nfo, process_movie_nfo
+except ImportError:
+    try:
+        from nfo_manager import process_episode_nfo, process_series_nfo, process_movie_nfo
+    except ImportError:
+        def process_episode_nfo(*args, **kwargs): return False
+        def process_series_nfo(*args, **kwargs): return False
+        def process_movie_nfo(*args, **kwargs): return False
+
 PORT = 5056
 CONFIG_FILE = Path(__file__).parent / "sync_web_config.json"
+
+SONARR_URL = os.getenv("SONARR_URL", "http://192.168.1.131:8989")
+SONARR_API_KEY = os.getenv("SONARR_API_KEY", "91528f758b7f42be9b10852ee230bf41")
+JELLYFIN_URL = os.getenv("JELLYFIN_URL", "http://192.168.1.124:8096")
+JELLYFIN_API_KEY = os.getenv("JELLYFIN_API_KEY", "e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9")
+JELLYFIN_USER_ID = os.getenv("JELLYFIN_USER_ID", "123e41c092994566b62c27fb5e7f526a")
 
 IS_WINDOWS = os.name == "nt"
 
@@ -265,6 +282,9 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
     </div>
     <div style="display:flex; gap:10px; align-items:center;">
+      <button onclick="syncAllNfos()" id="btn-sync-nfos" class="btn btn-secondary btn-sm" title="Actualiza títulos en inglés y sinopsis en español en todos los archivos NFO del disco">
+        📝 Sincronizar NFOs (Español)
+      </button>
       <a href="http://192.168.1.125:5055" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration:none;">
         📺 Abrir AutoSub (Subtítulos)
       </a>
@@ -376,6 +396,23 @@ let currentConfig = {};
 let currentEpisodes = [];
 let fsTargetInput = null;
 let currentFsBrowsePath = '/data';
+
+async function syncAllNfos() {
+  const btn = document.getElementById('btn-sync-nfos');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '⏳ Procesando NFOs...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/sync_all_nfos', { method: 'POST' });
+    const data = await res.json();
+    alert(data.message || 'Sincronización masiva de NFOs iniciada en segundo plano.');
+  } catch(e) {
+    alert('Error al conectar: ' + e);
+  } finally {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+  }
+}
 
 window.addEventListener('DOMContentLoaded', async () => {
   await loadConfig();
@@ -729,6 +766,72 @@ function closeModal() {
 """
 
 
+def notify_jellyfin_refresh(item_name: str = None):
+    """Notifica a Jellyfin de forma asíncrona para refrescar metadatos desde los archivos NFO en disco."""
+    if not item_name:
+        return
+
+    def _do():
+        try:
+            headers = {"User-Agent": "AutoDub-JellyfinSync/1.0"}
+            name_q = urllib.parse.quote(item_name)
+            jf_url = f"{JELLYFIN_URL}/Users/{JELLYFIN_USER_ID}/Items?api_key={JELLYFIN_API_KEY}&IncludeItemTypes=Series,Movie&searchTerm={name_q}&limit=5"
+            req = urllib.request.Request(jf_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as r:
+                items = json.loads(r.read().decode("utf-8")).get("Items", [])
+            for it in items:
+                it_id = it.get("Id")
+                post_url = f"{JELLYFIN_URL}/Items/{it_id}/Refresh?api_key={JELLYFIN_API_KEY}&MetadataRefreshMode=Default&ImageRefreshMode=None"
+                with urllib.request.urlopen(urllib.request.Request(post_url, headers=headers, method="POST"), timeout=10) as pr:
+                    if pr.status in (200, 204):
+                        print(f"[Jellyfin Refresh] ✔ Refresco solicitado para '{it.get('Name')}'", flush=True)
+                        break
+        except Exception as e:
+            print(f"[Jellyfin Refresh] Aviso: {e}", flush=True)
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
+def handle_radarr_webhook(payload: dict) -> dict:
+    """Procesa eventos de Radarr para actualizar el .nfo de películas con sinopsis en español."""
+    event_type = payload.get("eventType", "")
+    print(f"\n[Radarr Webhook] Recibido evento: '{event_type}'")
+    if event_type == "Test":
+        return {"status": "ok", "message": "AutoDub Radarr webhook test successful"}
+
+    movie_info = payload.get("movie", {})
+    movie_title = movie_info.get("title", "").strip()
+    folder_path = movie_info.get("folderPath", "")
+    movie_file = payload.get("movieFile", {})
+    file_path = movie_file.get("path", "")
+
+    time.sleep(3)
+
+    nfo_candidates = []
+    if file_path:
+        nfo_candidates.append(f"{os.path.splitext(file_path)[0]}.nfo")
+    if folder_path:
+        nfo_candidates.append(os.path.join(folder_path, "movie.nfo"))
+        if os.path.exists(folder_path):
+            for f in os.listdir(folder_path):
+                if f.lower().endswith(".nfo"):
+                    nfo_candidates.append(os.path.join(folder_path, f))
+
+    processed = False
+    for nfo_p in nfo_candidates:
+        if os.path.exists(nfo_p):
+            res = process_movie_nfo(nfo_p, movie_title)
+            if res:
+                print(f"[Radarr Webhook] ✔ NFO de película '{movie_title}' actualizado en español: {os.path.basename(nfo_p)}")
+                processed = True
+                break
+
+    if processed and movie_title:
+        notify_jellyfin_refresh(movie_title)
+
+    return {"status": "ok", "processed": processed}
+
+
 class DubSyncWebHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -949,6 +1052,10 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
                 offset_sec, score = calculate_offset(nyaa_file, dub_file, trim=trim)
                 delay_ms = int(round(offset_sec * 1000))
 
+                if abs(offset_sec) > 45.0:
+                    self.send_json({"status": "error", "message": f"Desfase detectado excesivo ({offset_sec:+.3f}s > ±45s). Descartado por seguridad."}, status=400)
+                    return
+
                 # 3. Muxing
                 cmd = [
                     MKVMERGE_BIN,
@@ -995,10 +1102,32 @@ class DubSyncWebHandler(BaseHTTPRequestHandler):
                 self.send_json({"status": "ok", "message": "AutoDub webhook test successful"})
                 return
 
-            # Responder de inmediato a Sonarr (200 OK) para que libere la cola y complete el hardlink sin demoras.
-            # La sincronización acústica pesada se ejecuta en un hilo en segundo plano.
             threading.Thread(target=handle_sonarr_webhook, args=(payload,), daemon=True).start()
             self.send_json({"status": "queued", "message": "AutoDub sync job queued in background"})
+            return
+
+        if clean_path == "/api/radarr_webhook":
+            if payload.get("eventType") == "Test":
+                self.send_json({"status": "ok", "message": "AutoDub Radarr webhook test successful"})
+                return
+
+            threading.Thread(target=handle_radarr_webhook, args=(payload,), daemon=True).start()
+            self.send_json({"status": "queued", "message": "Radarr movie NFO processing queued in background"})
+            return
+
+        if clean_path == "/api/sync_all_nfos":
+            try:
+                from tools.batch_sync_nfos import scan_and_sync_tvshows, scan_and_sync_movies
+            except ImportError:
+                from batch_sync_nfos import scan_and_sync_tvshows, scan_and_sync_movies
+
+            def _run_batch():
+                scan_and_sync_tvshows("/data/tvshows")
+                if os.path.exists("/data/movies"):
+                    scan_and_sync_movies("/data/movies")
+
+            threading.Thread(target=_run_batch, daemon=True).start()
+            self.send_json({"status": "ok", "message": "Sincronización masiva de NFOs iniciada en segundo plano."})
             return
 
         self.send_error(404, "Not Found")
@@ -1015,6 +1144,23 @@ def handle_sonarr_webhook(payload: dict) -> dict:
     if event_type == "Test":
         return {"status": "ok", "message": "AutoDub webhook test successful"}
 
+    series_info = payload.get("series", {})
+    series_title = series_info.get("title", "").strip()
+    series_path = series_info.get("path", "").strip()
+
+    if event_type == "SeriesAdd":
+        print(f"\n[Sonarr Webhook] Nueva serie agregada en Sonarr: '{series_title}'")
+        def _on_series_add():
+            time.sleep(3)
+            if series_path and os.path.exists(series_path):
+                tvshow_nfo = os.path.join(series_path, "tvshow.nfo")
+                if os.path.exists(tvshow_nfo):
+                    if process_series_nfo(tvshow_nfo, series_title):
+                        print(f"[NFO Manager] ✔ tvshow.nfo inicializado: '{series_title}'")
+            notify_jellyfin_refresh(series_title)
+        threading.Thread(target=_on_series_add, daemon=True).start()
+        return {"status": "ok", "action": "series_add_processed"}
+
     valid_events = ("Download", "Upgrade", "EpisodeFileImport", "FileImport", "FileUpgrade", "Import")
     if event_type not in valid_events:
         print(f"[Sonarr Webhook] Evento '{event_type}' omitido (no es importación de archivo).")
@@ -1028,6 +1174,27 @@ def handle_sonarr_webhook(payload: dict) -> dict:
     new_size_mb = os.path.getsize(new_file_path) / (1024 * 1024)
     print(f"[Sonarr Webhook] Nuevo archivo: {new_file_path} ({round(new_size_mb, 1)} MB)")
 
+    # Procesar NFOs de la serie y del episodio en segundo plano
+    def _update_nfos_async():
+        time.sleep(3)
+        try:
+            if series_path and os.path.exists(series_path):
+                tvshow_nfo = os.path.join(series_path, "tvshow.nfo")
+                if os.path.exists(tvshow_nfo):
+                    if process_series_nfo(tvshow_nfo, series_title):
+                        print(f"[NFO Manager] ✔ tvshow.nfo actualizado: '{series_title}'")
+            if new_file_path:
+                ep_base = os.path.splitext(new_file_path)[0]
+                ep_nfo = f"{ep_base}.nfo"
+                if os.path.exists(ep_nfo):
+                    if process_episode_nfo(ep_nfo, series_title):
+                        print(f"[NFO Manager] ✔ NFO de episodio actualizado en español: {os.path.basename(ep_nfo)}")
+            notify_jellyfin_refresh(series_title)
+        except Exception as ex:
+            print(f"[NFO Manager] Error procesando NFOs: {ex}")
+
+    threading.Thread(target=_update_nfos_async, daemon=True).start()
+
     # Metadatos de la serie para aislamiento estricto
     series_info = payload.get("series", {})
     series_title = series_info.get("title", "").strip().lower()
@@ -1037,6 +1204,16 @@ def handle_sonarr_webhook(payload: dict) -> dict:
     # Palabras clave de la serie para búsqueda en /downloads (palabras de >= 4 caracteres)
     title_words = [w.lower() for w in re.findall(r'[a-zA-Z0-9]+', series_title) if len(w) >= 4]
 
+    # Palabras genéricas o de parada a ignorar en coincidencias para evitar falsos positivos
+    COMMON_STOPWORDS = {
+        "under", "with", "from", "that", "this", "have", "zero", "part", "anime",
+        "season", "episode", "full", "over", "super", "the", "and", "for", "para",
+        "world", "level", "online", "life", "time", "into", "about", "after"
+    }
+    meaningful_words = [w for w in title_words if w not in COMMON_STOPWORDS]
+    if not meaningful_words:
+        meaningful_words = title_words
+
     episodes = payload.get("episodes", [])
     season_num = episodes[0].get("seasonNumber") if episodes else None
     db_ep_num = episodes[0].get("episodeNumber") if episodes else None
@@ -1045,18 +1222,22 @@ def handle_sonarr_webhook(payload: dict) -> dict:
 
     def is_candidate_matching_series(cand_path):
         p_str = str(cand_path).lower()
-        # 1. Si está dentro de la carpeta de la serie en tvshows
+        # 1. Si está dentro de la carpeta oficial de la serie en tvshows
         if series_path and series_path in p_str:
             return True
-        # 2. Si está en .recycle bajo la subcarpeta de la serie
-        if ".recycle" in p_str and (series_folder_name in p_str or any(w in p_str for w in title_words)):
+        # 2. Si contiene el nombre exacto de la carpeta de la serie
+        if series_folder_name and series_folder_name.lower() in p_str:
             return True
-        # 3. Si está en /data/downloads, debe coincidir con alguna palabra clave de la serie
-        if "/downloads" in p_str:
+        # 3. Coincidencia por palabras clave completas (\bword\b), evitando subcadenas falsas (ej. "under" en "thunder")
+        matched_words = [w for w in meaningful_words if re.search(r'\b' + re.escape(w) + r'\b', p_str)]
+        req_count = min(2, len(meaningful_words))
+        if ".recycle" in p_str:
+            return len(matched_words) >= req_count
+        if "/downloads" in p_str or "downloads" in p_str:
             fname = os.path.basename(p_str).lower()
-            if any(w in fname for w in title_words):
-                return True
-        return False
+            fname_matched = [w for w in meaningful_words if re.search(r'\b' + re.escape(w) + r'\b', fname)]
+            return len(fname_matched) >= req_count
+        return len(matched_words) >= req_count
 
     def is_candidate_matching_season(cand_path):
         if season_num is None:
@@ -1087,21 +1268,28 @@ def handle_sonarr_webhook(payload: dict) -> dict:
 
     new_latino_id, new_latino_name = find_latino_audio(new_file_path)
 
-    # Buscar candidatos filtrando estrictamente por la misma serie y temporada
+    # Buscar candidatos filtrando estrictamente por la misma serie, temporada y número de episodio
     candidates = []
 
     # A) deletedFiles enviados por Sonarr
     for df in payload.get("deletedFiles", []):
         p = df.get("path")
-        if p and os.path.exists(p) and is_candidate_matching_series(p) and is_candidate_matching_season(p):
-            candidates.append(p)
+        if p and os.path.exists(p):
+            f_ep = extract_episode_number(os.path.basename(p))
+            if target_eps and f_ep is not None and f_ep not in target_eps:
+                continue
+            if is_candidate_matching_series(p) and is_candidate_matching_season(p):
+                candidates.append(p)
 
-    # B) Papelera de reciclaje común
+    # B) Papelera de reciclaje común (.recycle)
     for r_dir in (Path("/data/downloads/.recycle"), Path("/data/.recycle")):
         if r_dir.exists():
             for root, _, files in os.walk(r_dir):
                 for f in files:
                     if f.lower().endswith((".mkv", ".mp4")):
+                        f_ep = extract_episode_number(f)
+                        if target_eps and (f_ep is None or f_ep not in target_eps):
+                            continue
                         full_p = os.path.join(root, f)
                         if is_candidate_matching_series(full_p) and is_candidate_matching_season(full_p):
                             candidates.append(full_p)
@@ -1112,7 +1300,7 @@ def handle_sonarr_webhook(payload: dict) -> dict:
             for f in search_dir.iterdir():
                 if f.is_file() and f.suffix.lower() == ".mkv" and str(f) != new_file_path:
                     f_ep = extract_episode_number(f.name)
-                    if f_ep in target_eps and is_candidate_matching_series(str(f)) and is_candidate_matching_season(str(f)):
+                    if (not target_eps or f_ep in target_eps) and is_candidate_matching_series(str(f)) and is_candidate_matching_season(str(f)):
                         candidates.append(str(f))
 
     # Determinar qué archivo es la base de video y qué archivo es la fuente de doblaje
@@ -1172,9 +1360,16 @@ def handle_sonarr_webhook(payload: dict) -> dict:
         delay_ms = int(round(offset_sec * 1000))
         print(f"[Sonarr Webhook] Desfase calculado: {offset_sec:.3f}s ({delay_ms}ms), confianza Z: {score:.2f}")
 
-        if score < 3.5:
-            print(f"[Sonarr Webhook] ⚠️ Confianza acústica insuficiente (Z={score:.2f} < 3.5). Descartando para no mezclar audios erróneos.")
-            return {"status": "rejected", "reason": f"Acoustic confidence too low ({score:.2f})"}
+        # Filtro 1: Desfase temporal excesivo (desfases > ±45s indican audios o episodios no coincidentes)
+        if abs(offset_sec) > 45.0:
+            print(f"[Sonarr Webhook] ⚠️ Desfase excesivo detectado ({offset_sec:+.3f}s > ±45s). Descartando para evitar corrupción de sincronización.")
+            return {"status": "rejected", "reason": f"Excessive offset ({offset_sec:.3f}s > 45s)"}
+
+        # Filtro 2: Umbral de confianza adaptativo (Z >= 4.0 para desfases normales, Z >= 5.0 para desfases > 10s)
+        min_score = 4.0 if abs(offset_sec) <= 10.0 else 5.0
+        if score < min_score:
+            print(f"[Sonarr Webhook] ⚠️ Confianza acústica insuficiente (Z={score:.2f} < {min_score}). Descartando para no mezclar audios erróneos.")
+            return {"status": "rejected", "reason": f"Acoustic confidence too low ({score:.2f} < {min_score})"}
 
         tmp_out = f"{new_file_path}.tmp_autodub.mkv"
         cmd = [
