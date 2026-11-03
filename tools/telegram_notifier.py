@@ -256,7 +256,22 @@ def send_episode_rich_notification(
     if synopsis:
         synopsis = translate_synopsis_to_spanish(synopsis)
     else:
-        synopsis = "Episodio disponible con sincronización completa."
+        # Si ni Sonarr ni el NFO tenían sinopsis, consultar TMDb con fallback en inglés
+        try:
+            try:
+                from tools.nfo_manager import fetch_tmdb_synopsis, find_series_tmdb_id
+            except ImportError:
+                from nfo_manager import fetch_tmdb_synopsis, find_series_tmdb_id
+
+            if nfo_path and os.path.exists(nfo_path):
+                tmdb_id = find_series_tmdb_id(nfo_path)
+                if tmdb_id and season_num is not None and ep_num is not None:
+                    synopsis = fetch_tmdb_synopsis(f"tv/{tmdb_id}/season/{season_num}/episode/{ep_num}")
+        except Exception:
+            pass
+
+        if not synopsis:
+            synopsis = "Sinopsis oficial no disponible al momento del estreno."
 
     # 3. Etiquetas de género (arriba)
     genres = series_info.get("genres", [])
