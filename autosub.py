@@ -959,10 +959,11 @@ TONO Y ESTILO: {tone_info}
 {chars_info}
 GLOSARIO OBLIGATORIO: {glossary_info}
 REGLAS ESTRICTAS:
-1. Mantén TODAS las etiquetas ASS entre llaves (ej. {{\\i1}}, {{\\pos(x,y)}}) y saltos \\N intactos.
-2. Si una línea tras un salto \\N empieza con la palabra 'No' o con una palabra que empieza por 'N', NUNCA unas la 'N' de la palabra con el salto \\N (debe ser '\\N No' o '\\NNo', jamás '\\No puedo' que se comería la 'N').
-3. Devuelve EXACTAMENTE la misma cantidad de líneas numeradas con el formato [N] Texto traducido.
-4. No agregues explicaciones ni notas."""
+1. Mantén TODAS las etiquetas ASS entre llaves (ej. {{\\i1}}, {{\\pos(x,y)}}) y saltos \\N intactos en la posición adecuada.
+2. PRESERVA EL SENTIDO EXACTO: NUNCA inviertas condiciones ni negaciones (por ejemplo, 'Don't look or she'll beat you' debe ser '¡No mires o te dará una paliza!', jamás 'No mires No te dará...').
+3. NATURALIDAD Y ESPAÑOL AUTÉNTICO: Evita calcos literales del inglés (ej. 'Little Lady Liston' -> 'Jovencita Liston' o 'Señorita Liston', jamás 'pequeña señorita'; 'ruining' -> 'arruinando', la palabra 'ruinando' NO existe en español; 'infiltrate the place' -> 'te infiltras allí' o 'te infiltras en ese lugar').
+4. Devuelve EXACTAMENTE la misma cantidad de líneas numeradas con el formato [N] Texto traducido.
+5. No agregues explicaciones ni notas."""
 
     context_block = ""
     if prev_context:
@@ -1031,11 +1032,13 @@ TONO Y ESTILO: {tone_info}
 GLOSARIO OBLIGATORIO: {glossary_info}
 
 Tu tarea es revisar las líneas traducidas ({target_meta['ext'].upper()}) comparándolas con el diálogo original para detectar y corregir errores puntuales:
-1. Palabras deformadas, alucinadas o inventadas por el modelo.
-2. Palabras residuales del idioma de origen que debieron traducirse al {prompt_lang}.
-3. Errores ortográficos o de concordancia de género según el personaje que habla.
-4. Asegurar que los términos del GLOSARIO OBLIGATORIO se respeten.
-5. Palabras mutiladas o letras comidas tras saltos \\N o etiquetas: Compara cada término clave con el original en inglés. Es un error crítico de tokenización que una palabra pierda su primera consonante al estar pegada a \\N (ejemplos reales: 'seasoned' traducido erróneamente como '\\Nazonada' -> DEBES RESTAURARLO como '\\Nsazonada'; 'can\\'t' traducido como '\\No puedo' -> DEBE SER '\\N No puedo'; '\\Nervida' -> '\\Nservida'; '\\Nuvia' -> '\\Nlluvia'). Si ves una palabra tras \\N a la que le falta una letra para concordar con el sentido del diálogo original, RESTAURA la palabra completa de inmediato.
+1. Palabras deformadas, alucinadas, inventadas o falsos cognados (ej. 'ruinando' DEBE SER 'arruinando'; jamás inventes palabras inexistentes en español).
+2. Inversiones lógicas de sentido o negaciones contradictorias (ej. 'Don't look or she'll beat you' DEBE SER '¡No mires o te dará una paliza!', NUNCA 'No te dará...').
+3. Calcos literales torpes del inglés (ej. 'Little Lady Liston' -> 'Jovencita Liston' o 'Señorita Liston', nunca 'pequeña señorita'; 'infiltrate the place' -> 'te infiltras en ese lugar').
+4. Palabras residuales del idioma de origen que debieron traducirse al {prompt_lang}.
+5. Errores ortográficos o de concordancia de género según el personaje que habla.
+6. Asegurar que los términos del GLOSARIO OBLIGATORIO se respeten.
+7. Palabras mutiladas o letras comidas tras saltos \\N o etiquetas: Compara cada término clave con el original en inglés. Es un error crítico de tokenización que una palabra pierda su primera consonante al estar pegada a \\N (ejemplos reales: 'seasoned' traducido erróneamente como '\\Nazonada' -> DEBES RESTAURARLO como '\\Nsazonada'; 'can\\'t' traducido como '\\No puedo' -> DEBE SER '\\N No puedo'; '\\Nervida' -> '\\Nservida'; '\\Nuvia' -> '\\Nlluvia'). Si ves una palabra tras \\N a la que le falta una letra para concordar con el sentido del diálogo original, RESTAURA la palabra completa de inmediato.
 
 REGLAS CRÍTICAS E INQUEBRANTABLES:
 1. NUNCA AGREGUES NI ELIMINES LÍNEAS. Debe haber exactamente una línea de salida por cada línea de entrada.
