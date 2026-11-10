@@ -1783,6 +1783,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 del retry_queue[video_path]
                 save_persisted_queue()
 
+        if any_success and not context_only:
+            try:
+                try:
+                    from tools.telegram_notifier import send_episode_rich_notification
+                except ImportError:
+                    from telegram_notifier import send_episode_rich_notification
+                send_episode_rich_notification(video_path)
+                print(f"[AutoSub] Notificación de Telegram enviada para {os.path.basename(video_path)}", flush=True)
+            except Exception as ex_tg:
+                print(f"[AutoSub] Error enviando notificación de Telegram: {ex_tg}", flush=True)
+
     except Exception as ex:
         enqueue_retry(video_path, force, series_name, str(ex), context_only=context_only, target_languages=target_langs)
         return False

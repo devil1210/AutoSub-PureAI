@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # -*- coding: utf-8 -*-
 """
 sync_web.py - Servidor Web UI para Sincronización Automática de Audio Latino
@@ -1251,6 +1252,23 @@ def handle_sonarr_webhook(payload: dict) -> dict:
             return False
         return True
 
+    def get_video_codec(file_path):
+        try:
+            info = get_mkv_tracks(file_path)
+            for t in info.get("tracks", []):
+                if t.get("type") == "video":
+                    c = (t.get("codec", "") or t.get("properties", {}).get("codec_id", "")).lower()
+                    if "av1" in c or "av01" in c:
+                        return "av1"
+                    if "hevc" in c or "h265" in c or "265" in c:
+                        return "hevc"
+                    if "avc" in c or "h264" in c or "264" in c:
+                        return "h264"
+                    return c
+        except Exception:
+            pass
+        return ""
+
     def find_latino_audio(file_path):
         try:
             info = get_mkv_tracks(file_path)
@@ -1265,6 +1283,23 @@ def handle_sonarr_webhook(payload: dict) -> dict:
         except Exception:
             pass
         return None, None
+
+    def has_spanish_content(file_path):
+        try:
+            info = get_mkv_tracks(file_path)
+            for t in info.get("tracks", []):
+                props = t.get("properties", {})
+                lang = (props.get("language", "") or props.get("language_ietf", "")).lower()
+                name = (props.get("track_name", "")).lower()
+                if "lat" in name or "latino" in name or lang in ("es-419", "spa", "es"):
+                    return True
+        except Exception:
+            pass
+        base, _ = os.path.splitext(file_path)
+        for ext in (".es-419.ass", ".es-419.srt", ".spa.ass", ".spa.srt", ".es.ass", ".es.srt"):
+            if os.path.exists(f"{base}{ext}"):
+                return True
+        return False
 
     new_latino_id, new_latino_name = find_latino_audio(new_file_path)
 
@@ -1316,6 +1351,10 @@ def handle_sonarr_webhook(payload: dict) -> dict:
             if os.path.exists(cand):
                 sz = os.path.getsize(cand) / (1024 * 1024)
                 if 80 <= sz <= 600:
+                    cand_codec = get_video_codec(cand)
+                    if cand_codec == "av1":
+                        print(f"[Sonarr Webhook] Ignorando candidato AV1 '{cand}' para evitar incompatibilidad de reproducción en hardware sin soporte AV1.")
+                        continue
                     light_ref = cand
                     dub_source = new_file_path
                     dub_audio_id = new_latino_id
@@ -1326,6 +1365,9 @@ def handle_sonarr_webhook(payload: dict) -> dict:
     elif new_size_mb < 600:
         for cand in candidates:
             if os.path.exists(cand):
+                cand_codec = get_video_codec(cand)
+                if cand_codec == "av1":
+                    continue
                 c_lat_id, c_lat_name = find_latino_audio(cand)
                 if c_lat_id is not None:
                     light_ref = new_file_path
@@ -1342,7 +1384,12 @@ def handle_sonarr_webhook(payload: dict) -> dict:
             msg = f"El archivo nuevo es ligero ({round(new_size_mb, 1)} MB), pero no se encontró fuente con audio latino de la misma serie."
         print(f"[Sonarr Webhook] {msg}")
 
-        # Notificar a Telegram la llegada del episodio importado
+        # Si el episodio no tiene doblaje ni subtítulos en español, delegar la notificación a AutoSub
+        if new_latino_id is None and not has_spanish_content(new_file_path):
+            print(f"[Sonarr Webhook] Omitiendo notificación Telegram: episodio sin pistas en español. AutoSub procesará los subtítulos y notificará al terminar.", flush=True)
+            return {"status": "ok", "reason": msg, "action": "imported_as_is", "notification": "delegated_to_autosub"}
+
+        # Notificar a Telegram la llegada del episodio importado (si ya cuenta con audio o subtítulos en español)
         time.sleep(2)
         try:
             send_episode_rich_notification(new_file_path, payload)
@@ -1371,7 +1418,8 @@ def handle_sonarr_webhook(payload: dict) -> dict:
             print(f"[Sonarr Webhook] ⚠️ Confianza acústica insuficiente (Z={score:.2f} < {min_score}). Descartando para no mezclar audios erróneos.")
             return {"status": "rejected", "reason": f"Acoustic confidence too low ({score:.2f} < {min_score})"}
 
-        tmp_out = f"{new_file_path}.tmp_autodub.mkv"
+        # Archivo temporal oculto con extensión .tmp para que Sonarr no lo indexe durante el muxing
+        tmp_out = str(Path(new_file_path).parent / f".tmp_autodub_{Path(new_file_path).name}.tmp")
         cmd = [
             MKVMERGE_BIN,
             "-o", tmp_out,
