@@ -361,37 +361,47 @@ def send_episode_rich_notification(
 
     file_sz_mb = round(os.path.getsize(file_path) / (1024 * 1024), 1)
 
-    # 6. Imagen de portada / captura
-    # Prioridad: <base_name>-thumb.jpg -> seasonXX-poster.jpg -> poster.jpg -> fanart.jpg
-    thumb_candidates = [
-        os.path.join(dir_path, f"{base_name}-thumb.jpg"),
-        os.path.join(dir_path, f"season{season_num:02d}-poster.jpg"),
-        os.path.join(Path(dir_path).parent, f"season{season_num:02d}-poster.jpg"),
-        os.path.join(dir_path, "poster.jpg"),
-        os.path.join(Path(dir_path).parent, "poster.jpg"),
-        os.path.join(dir_path, "fanart.jpg"),
-        os.path.join(Path(dir_path).parent, "fanart.jpg"),
-    ]
-
+    # 6. Imagen de captura del episodio (Prioridad: Captura real del capítulo)
+    # 1. Comprobar si ya existe <base_name>-thumb.jpg guardado por Sonarr/Kodi
+    ep_thumb_path = os.path.join(dir_path, f"{base_name}-thumb.jpg")
     selected_thumb = None
-    for tc in thumb_candidates:
-        if os.path.exists(tc) and os.path.getsize(tc) > 1000:
-            selected_thumb = tc
-            break
-
-    # Si no hay imagen, extraer fotograma rápido con ffmpeg
     temp_thumb = None
-    if not selected_thumb:
-        temp_thumb = f"/tmp/thumb_{os.getpid()}_{int(time.time())}.jpg"
+
+    if os.path.exists(ep_thumb_path) and os.path.getsize(ep_thumb_path) > 1000:
+        selected_thumb = ep_thumb_path
+    else:
+        # 2. Si Sonarr aún no ha guardado la miniatura del capítulo, extraer fotograma 1080p con ffmpeg
+        # Se extrae en el minuto 03:30 (saltando el opening) y se guarda directamente como -thumb.jpg
         try:
-            subprocess.run([
-                "ffmpeg", "-y", "-ss", "00:03:00", "-i", file_path,
-                "-vframes", "1", "-q:v", "2", temp_thumb
-            ], capture_output=True, timeout=10)
-            if os.path.exists(temp_thumb) and os.path.getsize(temp_thumb) > 1000:
-                selected_thumb = temp_thumb
-        except Exception:
-            pass
+            cmd_thumb = [
+                "ffmpeg", "-y", "-ss", "00:03:30", "-i", file_path,
+                "-vframes", "1", "-q:v", "2", ep_thumb_path
+            ]
+            res_thumb = subprocess.run(cmd_thumb, capture_output=True, timeout=15)
+            if os.path.exists(ep_thumb_path) and os.path.getsize(ep_thumb_path) > 1000:
+                selected_thumb = ep_thumb_path
+                try:
+                    os.chown(ep_thumb_path, 1000, 1000)
+                    os.chmod(ep_thumb_path, 0o644)
+                except Exception:
+                    pass
+        except Exception as ex_ff:
+            print(f"[TelegramNotifier] No se pudo extraer fotograma con ffmpeg: {ex_ff}")
+
+    # 3. Solo si la captura del episodio no existe ni pudo extraerse, usar póster estático de reserva
+    if not selected_thumb:
+        fallback_posters = [
+            os.path.join(dir_path, f"season{season_num:02d}-poster.jpg"),
+            os.path.join(Path(dir_path).parent, f"season{season_num:02d}-poster.jpg"),
+            os.path.join(dir_path, "poster.jpg"),
+            os.path.join(Path(dir_path).parent, "poster.jpg"),
+            os.path.join(dir_path, "fanart.jpg"),
+            os.path.join(Path(dir_path).parent, "fanart.jpg"),
+        ]
+        for fb in fallback_posters:
+            if os.path.exists(fb) and os.path.getsize(fb) > 1000:
+                selected_thumb = fb
+                break
 
     # 7. Construcción de la tabla detallada de pistas
     track_rows = []
