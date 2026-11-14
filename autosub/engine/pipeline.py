@@ -32,6 +32,7 @@ from autosub.engine.goldfish import (
     audit_and_polish_subtitles,
     clean_split_dialogue_punctuation
 )
+from autosub.engine.qa import run_full_subtitle_qa
 from autosub.providers.ollama import is_ollama_alive
 from autosub.subtitles.mkv import find_matching_target_track, select_source_track
 from autosub.subtitles.parser import is_translatable_ass_line
@@ -71,6 +72,7 @@ def process_file(video_path, force=False, context_only=False, target_languages=N
                 fmt = "Contexto" if context_only else f"{ctx.last_job_metrics.get('format', 'SRT')} [{targets_label}]"
                 model_used = app_config.get("local_model") if app_config.get("local_only") else app_config.get("cloud_model")
                 status_txt = "Contexto Extraído" if context_only else "Completado"
+                qa_info = ctx.last_job_metrics.get("qa_report") or {}
                 record = {
                     "id": int(time.time() * 1000),
                     "file_name": os.path.basename(video_path),
@@ -84,7 +86,11 @@ def process_file(video_path, force=False, context_only=False, target_languages=N
                     "target_languages": used_targets,
                     "model": model_used,
                     "proofread": bool(app_config.get("proofread", True)),
-                    "status": status_txt
+                    "status": status_txt,
+                    "qa_score": qa_info.get("overall_score"),
+                    "qa_badge": qa_info.get("badge"),
+                    "qa_summary": qa_info.get("summary_line"),
+                    "qa_grade": qa_info.get("grade")
                 }
                 append_history_record(record)
             ctx.currently_processing = None
@@ -286,6 +292,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 audited_texts = d_texts
 
                             save_ass_and_srt_outputs(out_ass, out_srt, ass_lines, d_indices, audited_texts)
+                            try:
+                                qa_report = run_full_subtitle_qa(
+                                    d_texts,
+                                    audited_texts,
+                                    profile_data=profile_data,
+                                    run_llm_check=True
+                                )
+                                ctx.last_job_metrics["qa_report"] = qa_report
+                                print(f"[QA Inspector] {qa_report['summary_line']}", flush=True)
+                            except Exception as e_qa:
+                                print(f"[QA Inspector] ⚠️ Error ejecutando auditoría QA: {e_qa}", flush=True)
                             any_success = True
                             continue
                         else:
@@ -320,6 +337,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 audited_texts = srt_texts
 
                             save_srt_output(out_srt, srt_cues, audited_texts)
+                            try:
+                                qa_report = run_full_subtitle_qa(
+                                    srt_texts,
+                                    audited_texts,
+                                    profile_data=profile_data,
+                                    run_llm_check=True
+                                )
+                                ctx.last_job_metrics["qa_report"] = qa_report
+                                print(f"[QA Inspector] {qa_report['summary_line']}", flush=True)
+                            except Exception as e_qa:
+                                print(f"[QA Inspector] ⚠️ Error ejecutando auditoría QA: {e_qa}", flush=True)
                             any_success = True
                             continue
                 except Exception as e_aud:
@@ -458,6 +486,20 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
             else:
                 save_srt_output(out_srt, source_data["cues"], translated_texts)
 
+            # Control de Calidad (QA Inspector)
+            try:
+                qa_report = run_full_subtitle_qa(
+                    src_texts,
+                    translated_texts,
+                    durations=source_data.get("durations"),
+                    profile_data=profile_data,
+                    run_llm_check=True
+                )
+                ctx.last_job_metrics["qa_report"] = qa_report
+                print(f"[QA Inspector] {qa_report['summary_line']}", flush=True)
+            except Exception as e_qa:
+                print(f"[QA Inspector] ⚠️ Error ejecutando auditoría QA: {e_qa}", flush=True)
+
             any_success = True
             if num_targets > 1:
                 time.sleep(0.3)
@@ -476,7 +518,8 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     from tools.telegram_notifier import send_episode_rich_notification
                 except ImportError:
                     from telegram_notifier import send_episode_rich_notification
-                send_episode_rich_notification(video_path)
+                qa_report = ctx.last_job_metrics.get("qa_report")
+                send_episode_rich_notification(video_path, qa_report=qa_report)
                 print(f"[AutoSub] Notificación de Telegram enviada para {os.path.basename(video_path)}", flush=True)
             except Exception as ex_tg:
                 print(f"[AutoSub] Error enviando notificación de Telegram: {ex_tg}", flush=True)

@@ -256,7 +256,7 @@ async function loadHistory() {
 function renderHistoryTable(records) {
   const tbody = document.getElementById('history-tbody');
   if (!records || records.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:16px;">No hay registros en el historial todavía.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:16px;">No hay registros en el historial todavía.</td></tr>';
     return;
   }
   tbody.innerHTML = records.map(r => {
@@ -268,6 +268,14 @@ function renderHistoryTable(records) {
     const proofBadge = isContextOnly
       ? '<span class="badge badge-purple">🧠 Contexto</span>'
       : (r.proofread ? '<span class="badge badge-green">Sí</span>' : '<span class="badge badge-gray">No</span>');
+
+    let qaBadge = '<span class="badge badge-gray">-</span>';
+    if (r.qa_score !== undefined && r.qa_score !== null) {
+      let bClass = 'badge-green';
+      if (r.qa_score < 75) bClass = 'badge-red';
+      else if (r.qa_score < 85) bClass = 'badge-yellow';
+      qaBadge = `<span class="badge ${bClass}" title="${r.qa_summary || ''}">${r.qa_badge || (r.qa_score + '%')}</span>`;
+    }
 
     return `
       <tr>
@@ -281,6 +289,7 @@ function renderHistoryTable(records) {
         <td>${r.lines_count || 0}</td>
         <td style="font-size:12px;">${r.model || 'Auto'}</td>
         <td>${proofBadge}</td>
+        <td>${qaBadge}</td>
         <td>
           <button class="btn btn-secondary btn-sm" onclick="reprocessSingleFile('${(r.path || '').replace(/'/g, "\\'")}')">
             ${ICON_REFRESH} Reprocesar

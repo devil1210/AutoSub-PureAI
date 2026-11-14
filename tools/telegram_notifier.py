@@ -194,7 +194,8 @@ def send_episode_rich_notification(
     payload: Optional[Dict[str, Any]] = None,
     bot_token: Optional[str] = None,
     chat_id: Optional[str] = None,
-    topic_id: Optional[int] = None
+    topic_id: Optional[int] = None,
+    qa_report: Optional[Dict[str, Any]] = None
 ) -> bool:
     if not os.path.exists(file_path):
         print(f"[TelegramNotifier] Error: Archivo no existe: {file_path}")
@@ -433,6 +434,47 @@ def send_episode_rich_notification(
 
     tracks_table_html = "\n".join(track_rows)
 
+    # QA Subtitle Quality info
+    qa_row = ""
+    qa_info = qa_report
+    if not qa_info:
+        try:
+            candidates = []
+            try:
+                from autosub.config import HISTORY_FILE
+                candidates.append(HISTORY_FILE)
+            except Exception:
+                pass
+            candidates.extend([
+                "/opt/autosub_history.json",
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "autosub_history.json"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "autosub_history.json")
+            ])
+            for c_path in candidates:
+                if os.path.exists(c_path):
+                    with open(c_path, "r", encoding="utf-8") as hf:
+                        hdata = json.load(hf)
+                        if isinstance(hdata, list):
+                            for item in hdata:
+                                if item.get("path") == file_path or item.get("file_name") == file_name:
+                                    if item.get("qa_score") is not None:
+                                        qa_info = {
+                                            "overall_score": item.get("qa_score"),
+                                            "badge": item.get("qa_badge", "🟢 Aprobado")
+                                        }
+                                        break
+                    if qa_info:
+                        break
+        except Exception:
+            pass
+
+    if qa_info:
+        score = qa_info.get("overall_score")
+        if score is None:
+            score = qa_info.get("score", 100)
+        badge = qa_info.get("badge", "🟢 Aprobado")
+        qa_row = f'    <tr><th align="left">🏆 <b>Calidad QA</b></th><td>{badge} ({int(score)}/100)</td></tr>\n'
+
     # 8. Ensamblaje del HTML RichMessage
     html_content = f"""<img src="tg://photo?id=cover" />
 <h2>🎬 {html.escape(series_title)}</h2>
@@ -444,7 +486,7 @@ def send_episode_rich_notification(
   <table bordered striped compact>
     <tr><th align="left">🎧 <b>Audio</b></th><td>{audio_status}</td></tr>
     <tr><th align="left">💬 <b>Subtítulos</b></th><td>{sub_status}</td></tr>
-    <tr><th align="left">📦 <b>Release</b></th><td>{release_str}</td></tr>
+{qa_row}    <tr><th align="left">📦 <b>Release</b></th><td>{release_str}</td></tr>
     <tr><th align="left">🏷️ <b>Grupo</b></th><td>{html.escape(group_name)}</td></tr>
     <tr><th align="left">💾 <b>Tamaño</b></th><td>{file_sz_mb} MB</td></tr>
     <tr><th align="left">🕒 <b>Duración</b></th><td>{duration_str}</td></tr>
