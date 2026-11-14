@@ -28,3 +28,6 @@ autosub_queue.json
 autosub_history.json
 *telegram_config.json
 *sync_web_config.json
+series.json
+ep*.json
+

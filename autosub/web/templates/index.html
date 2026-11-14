@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoSub AI — Control Center v4.0</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css?v=4.0.2">
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <div class="header-left">
+      <div class="brand-icon" aria-hidden="true">
+        <svg width="22" height="22" style="width:22px; height:22px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">
+          AutoSub Pure AI
+          <span class="version-pill">v4.0 EGM</span>
+        </div>
+        <div class="brand-subtitle">Motor Cognitivo Elephant-Goldfish & Panel de Control de Subtítulos</div>
+      </div>
+    </div>
+
+    <!-- Nav Tabs -->
+    <nav class="nav-tabs">
+      <button class="nav-tab active" id="tab-btn-dashboard" onclick="switchTab('dashboard')">
+        <svg width="15" height="15" style="width:15px; height:15px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+        Traductor y Cola
+      </button>
+      <button class="nav-tab" id="tab-btn-history" onclick="switchTab('history')">
+        <svg width="15" height="15" style="width:15px; height:15px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Historial
+        <span class="tab-badge" id="badge-history-count">0</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-profiles" onclick="switchTab('profiles')">
+        <svg width="15" height="15" style="width:15px; height:15px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+        Perfiles
+        <span class="tab-badge" id="badge-profiles-count">0</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-settings" onclick="switchTab('settings')">
+        <svg width="15" height="15" style="width:15px; height:15px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        Configuración
+      </button>
+      <a href="http://192.168.1.125:5056" target="_blank" class="nav-tab" style="color: #38bdf8; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2);">
+        <svg width="15" height="15" style="width:15px; height:15px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z"/></svg>
+        Doblaje Latino
+      </a>
+    </nav>
+  </header>
+
+  <!-- ==================== TAB 1: DASHBOARD ==================== -->
+  <div id="tab-dashboard" class="tab-content active">
+    <!-- GPU & Status Strip -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-label">GPU Local (RTX 4070)</span>
+          <span class="metric-icon">
+            <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+          </span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span id="gpu-dot" class="status-dot offline"></span>
+          <span class="metric-value" id="gpu-status-text" style="font-size:16px;">Comprobando...</span>
+        </div>
+        <span class="metric-sub" id="gpu-model-sub">Ollama: qwen3.5:9b</span>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-label">Procesando Ahora</span>
+          <span class="metric-icon">
+            <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </span>
+        </div>
+        <div class="metric-value" id="current-file-text" style="font-size:14px; word-break:break-word; font-family:'Inter', sans-serif; font-weight:500;">Ninguno</div>
+        <span class="metric-sub" id="current-time-sub">0s</span>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-label">Completados</span>
+          <span class="metric-icon">
+            <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </span>
+        </div>
+        <div class="metric-value" id="jobs-done-text">0</div>
+        <span class="metric-sub" id="total-time-sub">Tiempo acumulado: 0s</span>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-header">
+          <span class="metric-label">Cola de Espera</span>
+          <span class="metric-icon">
+            <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+          </span>
+        </div>
+        <div class="metric-value" id="queue-count-text">0</div>
+        <span class="metric-sub" id="retry-count-sub">0 reintentos</span>
+      </div>
+    </div>
+
+    <!-- Quick Controls Strip -->
+    <div class="controls-strip">
+      <div class="control-item">
+        <span class="control-label">Modo Local:</span>
+        <label class="switch">
+          <input type="checkbox" id="local-only-switch" onchange="toggleQuickConfig('local_only')">
+          <span class="slider"></span>
+        </label>
+        <span id="local-mode-label" class="badge badge-blue">Local</span>
+      </div>
+
+      <div class="control-item">
+        <span class="control-label">Revisión Final:</span>
+        <label class="switch">
+          <input type="checkbox" id="proofread-switch" onchange="toggleQuickConfig('proofread')">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="control-item">
+        <span class="control-label">Modo Rápido:</span>
+        <label class="switch">
+          <input type="checkbox" id="fast-mode-switch" onchange="toggleQuickConfig('fast_mode')">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="control-item">
+        <span class="control-label">Lote:</span>
+        <select id="quick-batch-size" onchange="updateBatchSize(this.value)" style="width:120px; padding:6px 10px;">
+          <option value="50">50 líneas</option>
+          <option value="100">100 líneas</option>
+          <option value="150">150 líneas</option>
+          <option value="9999">Todas (Full)</option>
+        </select>
+      </div>
+
+      <div class="control-item" style="margin-left:auto;">
+        <button class="btn btn-danger btn-sm" id="btn-cancel" onclick="cancelCurrentJob()">
+          <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Cancelar Traducción Actual
+        </button>
+      </div>
+    </div>
+
+    <!-- Progress box -->
+    <div class="progress-box" id="progress-box" style="display:none;">
+      <div class="progress-header">
+        <span id="progress-title">Traduciendo...</span>
+        <span id="progress-percentage">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Media Selector for Reprocessing -->
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"/></svg>
+        <span>Selector de Archivos (Series y Películas)</span>
+        <button class="btn btn-secondary btn-sm" onclick="loadMediaCatalog()" style="margin-left:auto;">
+          <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Refrescar Catálogo
+        </button>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center;">
+        <div style="flex:1; min-width:260px;">
+          <select id="media-catalog-select" onchange="onCatalogItemSelected()">
+            <option value="">-- Seleccionar Serie o Película --</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="selectChecklist(true)">Seleccionar Todo</button>
+        <button class="btn btn-secondary btn-sm" onclick="selectChecklist(false)">Deseleccionar</button>
+        <button class="btn btn-primary btn-sm" onclick="enqueueSelectedMedia(false)">
+          <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+          Encolar para Traducir
+        </button>
+        <button class="btn btn-success btn-sm" onclick="enqueueSelectedMedia(true)" title="Extrae el contexto del episodio (resumen narrativo, personajes y glosario) sin traducir ni modificar los subtítulos">
+          <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          Solo Extraer Contexto
+        </button>
+      </div>
+
+      <!-- Target Languages Chips -->
+      <div class="target-languages-bar">
+        <span class="target-lang-label">
+          <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Idiomas Objetivo:
+        </span>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="es-419" checked> <span class="lang-code-badge">LAT</span> Español Latino</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="es"> <span class="lang-code-badge">ES</span> Español España</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="en"> <span class="lang-code-badge">EN</span> English</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="fr"> <span class="lang-code-badge">FR</span> Français</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="de"> <span class="lang-code-badge">DE</span> Deutsch</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="pt-BR"> <span class="lang-code-badge">BR</span> Português (BR)</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="it"> <span class="lang-code-badge">IT</span> Italiano</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="ja"> <span class="lang-code-badge">JA</span> 日本語</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="ru"> <span class="lang-code-badge">RU</span> Русский</label>
+        <label class="lang-chip"><input type="checkbox" class="enqueue-target-chk" value="zh-CN"> <span class="lang-code-badge">ZH</span> 简体中文</label>
+      </div>
+
+      <div id="media-files-list" class="checklist-grid">
+        <div style="color:var(--text-muted); font-size:12.5px; padding:12px;">Selecciona una serie o película arriba para listar sus archivos de video.</div>
+      </div>
+    </div>
+
+    <!-- Active Queue Table -->
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+        <span>Cola de Espera Activa</span>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:60px;">#</th>
+              <th>Archivo de Video</th>
+              <th>Ruta Completa</th>
+              <th style="width:100px;">Acción</th>
+            </tr>
+          </thead>
+          <tbody id="active-queue-tbody">
+            <tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:16px;">No hay archivos pendientes en la cola.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 2: HISTORIAL ==================== -->
+  <div id="tab-history" class="tab-content">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between; flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Historial de Traducciones</span>
+          <span class="badge badge-purple" id="hist-total-badge">0 registros</span>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input type="text" id="hist-search" placeholder="Filtrar por serie, archivo o modelo..." oninput="filterHistory()" style="width:280px;">
+          <button class="btn btn-danger btn-sm" onclick="clearHistory()">
+            <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            Limpiar Historial
+          </button>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:160px;">Fecha y Hora</th>
+              <th>Serie / Película</th>
+              <th>Archivo</th>
+              <th style="width:110px;">Duración</th>
+              <th style="width:80px;">Líneas</th>
+              <th style="width:140px;">Modelo</th>
+              <th style="width:90px;">Revisión</th>
+              <th style="width:120px;">Acción</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody">
+            <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:16px;">Cargando historial...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 3: PERFILES ==================== -->
+  <div id="tab-profiles" class="tab-content">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between; flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+          <span>Visor y Editor de Perfiles Narrativos</span>
+          <select id="profile-selector" onchange="onProfileSelected()" style="width:260px;">
+            <option value="">-- Seleccionar Perfil --</option>
+          </select>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="startNewProfile()">
+            <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+            Nuevo
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="promptGenerateProfile()">
+            <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            Generar con IA
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-toggle-profile-mode" onclick="toggleProfileMode()">Modo JSON</button>
+          <button class="btn btn-success btn-sm" onclick="saveCurrentProfile()">
+            <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+            Guardar Perfil
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="deleteCurrentProfile()">
+            <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            Eliminar
+          </button>
+        </div>
+      </div>
+
+      <!-- Modo Visual -->
+      <div id="profile-visual-container">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:14px; margin-bottom:16px;">
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; display:block; margin-bottom:6px;">Título de la Serie / Clave</label>
+            <input type="text" id="prof-series-title" placeholder="Ej. Reincarnated as a Sword">
+          </div>
+          <div>
+            <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; display:block; margin-bottom:6px;">Título Oficial</label>
+            <input type="text" id="prof-official-title" placeholder="Ej. Tensei Shitara Ken Deshita">
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; display:block; margin-bottom:6px;">Ambientación & Premisa</label>
+          <textarea id="prof-setting" rows="3" placeholder="Resumen del universo y premisa para guiar a la IA..."></textarea>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <label style="font-size:11.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em; display:block; margin-bottom:6px;">Instrucciones de Tono y Estilo</label>
+          <textarea id="prof-tone" rows="2" placeholder="Tono español latino neutro, manejo de tuteo, muletillas..."></textarea>
+        </div>
+
+        <!-- Personajes Table -->
+        <div style="margin-bottom:24px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:600; color:var(--text-main);">Personajes y Géneros</span>
+            <button class="btn btn-secondary btn-sm" onclick="addCharacterRow()">+ Agregar Personaje</button>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:200px;">Nombre</th>
+                  <th style="width:140px;">Género</th>
+                  <th>Personalidad y Forma de Hablar</th>
+                  <th style="width:70px;">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="prof-characters-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Glosario Table -->
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:600; color:var(--text-main);">Glosario Obligatorio</span>
+            <button class="btn btn-secondary btn-sm" onclick="addGlossaryRow()">+ Agregar Término</button>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:280px;">Término Original (Inglés/JP)</th>
+                  <th>Traducción Oficial (Español Latino)</th>
+                  <th style="width:70px;">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="prof-glossary-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Continuidad y Contexto por Episodio -->
+        <div style="margin-top:28px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+            <div>
+              <span style="font-size:13px; font-weight:600; color:var(--text-main);">Contexto Narrativo y Continuidad por Capítulo</span>
+              <span style="font-size:11.5px; color:var(--text-muted); margin-left:8px;">(Auto-generado tras procesar cada capítulo o editable)</span>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="addEpisodeContextRow()">+ Agregar Capítulo Manual</button>
+          </div>
+          <div id="prof-episodes-container" style="display:flex; flex-direction:column; gap:10px;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Modo JSON Raw -->
+      <div id="profile-json-container" style="display:none;">
+        <textarea id="prof-json-raw" class="code-textarea" rows="24" placeholder="{ ... }"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 4: CONFIGURACIÓN ==================== -->
+  <div id="tab-settings" class="tab-content">
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" style="width:18px; height:18px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+        <span>Ajustes del Sistema y Claves API</span>
+      </div>
+      <div class="settings-grid">
+
+        <!-- Card 1: Red y Ollama -->
+        <div class="card" style="margin-bottom:0; background:var(--surface-subtle);">
+          <div class="card-title" style="font-size:13px;">GPU Local (Ollama)</div>
+          <div class="setting-group">
+            <label>IP del Servidor Ollama</label>
+            <input type="text" id="cfg-ollama-ip" placeholder="192.168.1.12">
+            <div class="setting-help">IP del PC con la RTX 4070 ejecutando Ollama.</div>
+          </div>
+          <div class="setting-group">
+            <label>Puerto Ollama</label>
+            <input type="number" id="cfg-ollama-port" placeholder="11434">
+          </div>
+          <div class="setting-group">
+            <label>Modelo Local</label>
+            <div style="display:flex; gap:6px;">
+              <select id="cfg-local-model"></select>
+              <button class="btn btn-secondary btn-sm" onclick="loadOllamaModels()">
+                <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Nube y API Keys -->
+        <div class="card" style="margin-bottom:0; background:var(--surface-subtle);">
+          <div class="card-title" style="font-size:13px;">Proveedores de Nube</div>
+          <div class="setting-group">
+            <label>Google Gemini API Key</label>
+            <div style="display:flex; gap:6px;">
+              <input type="password" id="cfg-gemini-key" placeholder="AIzaSy...">
+              <button class="btn btn-secondary btn-sm" onclick="togglePasswordVisibility('cfg-gemini-key')">
+                <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>Modelo Nube Preferido</label>
+            <select id="cfg-cloud-model">
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Recomendado)</option>
+              <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+              <option value="gemma-4-31b-it">gemma-4-31b-it (14.4k req/día)</option>
+              <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it</option>
+              <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <label>OpenRouter API Key</label>
+            <div style="display:flex; gap:6px;">
+              <input type="password" id="cfg-or-key" placeholder="sk-or-v1-...">
+              <button class="btn btn-secondary btn-sm" onclick="togglePasswordVisibility('cfg-or-key')">
+                <svg width="14" height="14" style="width:14px; height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="setting-group" style="display:flex; align-items:center; gap:10px; margin-top:14px;">
+            <input type="checkbox" id="cfg-enable-or" style="width:16px; height:16px; accent-color:var(--primary);">
+            <label for="cfg-enable-or" style="margin-bottom:0; cursor:pointer; font-size:12px; font-weight:500;">Habilitar OpenRouter como fallback secundario</label>
+          </div>
+        </div>
+
+        <!-- Card 3: Prioridad de Idiomas y Salida -->
+        <div class="card" style="margin-bottom:0; background:var(--surface-subtle); grid-column: 1 / -1;">
+          <div class="card-title" style="font-size:13px;">Idiomas y Prioridad de Selección</div>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:18px;">
+            <div class="setting-group" style="margin-bottom:0;">
+              <label>Prioridad de Pistas Fuente en MKV</label>
+              <input type="text" id="cfg-source-priority" placeholder="ja, en, fr, de, es, it, pt, ru, zh">
+              <div class="setting-help">Orden de preferencia para extraer el subtítulo original del video (ej. 1° <code>ja</code>, 2° <code>en</code>, 3° <code>fr</code>).</div>
+            </div>
+            <div class="setting-group" style="margin-bottom:0;">
+              <label>Idiomas de Salida Predeterminados</label>
+              <div id="cfg-target-languages-grid" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="es-419"> <span class="lang-code-badge">LAT</span> Español Latino</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="es"> <span class="lang-code-badge">ES</span> Español España</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="en"> <span class="lang-code-badge">EN</span> English</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="fr"> <span class="lang-code-badge">FR</span> Français</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="de"> <span class="lang-code-badge">DE</span> Deutsch</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="pt-BR"> <span class="lang-code-badge">BR</span> Português</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="it"> <span class="lang-code-badge">IT</span> Italiano</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="ja"> <span class="lang-code-badge">JA</span> 日本語</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="ru"> <span class="lang-code-badge">RU</span> Русский</label>
+                <label class="lang-chip"><input type="checkbox" class="cfg-target-chk" value="zh-CN"> <span class="lang-code-badge">ZH</span> 简体中文</label>
+              </div>
+              <div class="setting-help">El motor cognitivo adapta automáticamente el tamaño del lote si se seleccionan múltiples idiomas.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: Bibliotecas y Rutas de Medios -->
+        <div class="card" style="margin-bottom:0; background:var(--surface-subtle); grid-column: 1 / -1;">
+          <div class="card-title" style="font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+            <span>Bibliotecas y Rutas de Medios</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="addLibraryRow('', '')">+ Agregar Biblioteca</button>
+          </div>
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+            Configura el nombre visible de tus bibliotecas (ej: <strong>Anime</strong>, <strong>Películas</strong>, <strong>Doramas</strong>) y su ruta física en el servidor.
+          </div>
+          <div id="cfg-libraries-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; display:flex; justify-content:flex-end;">
+        <button class="btn btn-primary" onclick="saveAllSettings()" style="padding:10px 24px;">Guardar Toda la Configuración</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast Popup -->
+<div id="toast">Notificación</div>
+
+<script src="/static/js/app.js?v=4.0.2"></script>
+</body>
+</html>

@@ -1384,19 +1384,10 @@ def handle_sonarr_webhook(payload: dict) -> dict:
             msg = f"El archivo nuevo es ligero ({round(new_size_mb, 1)} MB), pero no se encontró fuente con audio latino de la misma serie."
         print(f"[Sonarr Webhook] {msg}")
 
-        # Si el episodio no tiene doblaje ni subtítulos en español, delegar la notificación a AutoSub
-        if new_latino_id is None and not has_spanish_content(new_file_path):
-            print(f"[Sonarr Webhook] Omitiendo notificación Telegram: episodio sin pistas en español. AutoSub procesará los subtítulos y notificará al terminar.", flush=True)
-            return {"status": "ok", "reason": msg, "action": "imported_as_is", "notification": "delegated_to_autosub"}
-
-        # Notificar a Telegram la llegada del episodio importado (si ya cuenta con audio o subtítulos en español)
-        time.sleep(2)
-        try:
-            send_episode_rich_notification(new_file_path, payload)
-        except Exception as ex:
-            print(f"[Sonarr Webhook] Error enviando notificacion RichMessage: {ex}")
-
-        return {"status": "ok", "reason": msg, "action": "imported_as_is"}
+        # Omitir notificación en AutoDub si es imported_as_is: delegar siempre a AutoSub
+        # AutoSub se encarga de auditar/traducir los subtítulos, actualizar el lore EGM y enviar la notificación final completa con fotograma.
+        print(f"[Sonarr Webhook] Omitiendo notificación Telegram en imported_as_is: AutoSub procesará los subtítulos/auditoría y notificará al terminar.", flush=True)
+        return {"status": "ok", "reason": msg, "action": "imported_as_is", "notification": "delegated_to_autosub"}
 
     print(f"[Sonarr Webhook] Sincronizando: Video base [{light_ref}] + Audio latino [{dub_source}] (Pista {dub_audio_id}: {dub_audio_name})")
 
