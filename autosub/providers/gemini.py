@@ -13,7 +13,7 @@ from autosub.providers.rate_limiter import (
     wait_for_gemini_slot
 )
 
-def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=35):
+def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=35, preferred_model=None):
     api_key = get_gemini_api_key()
     if not api_key:
         return None
@@ -29,7 +29,7 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
     # Control proactivo de frecuencia: máximo 10 peticiones por minuto
     wait_for_gemini_slot()
 
-    preferred = app_config.get("cloud_model", GEMINI_MODELS[0])
+    preferred = preferred_model or app_config.get("cloud_model", GEMINI_MODELS[0])
     ordered = [preferred] + [m for m in GEMINI_MODELS if m != preferred]
 
     contents = []
@@ -71,7 +71,7 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
                 time.sleep(2)
     return None
 
-def call_ai(prompt, system_instruction="", timeout=180, allow_cloud_override=False):
+def call_ai(prompt, system_instruction="", timeout=180, allow_cloud_override=False, preferred_model=None):
     res = call_ollama(prompt, system_instruction=system_instruction, timeout=timeout)
     if res:
         return res
@@ -81,4 +81,4 @@ def call_ai(prompt, system_instruction="", timeout=180, allow_cloud_override=Fal
         res = call_openrouter(prompt, system_instruction=system_instruction, timeout=timeout)
         if res:
             return res
-    return call_gemini_fallback(prompt, system_instruction=system_instruction, timeout=timeout)
+    return call_gemini_fallback(prompt, system_instruction=system_instruction, timeout=timeout, preferred_model=preferred_model)

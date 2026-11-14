@@ -444,15 +444,26 @@
             </div>
           </div>
           <div class="setting-group">
-            <label>Modelo Nube Preferido</label>
+            <label>Modelo Nube (The Goldfish - Traducción)</label>
             <select id="cfg-cloud-model">
+              <option value="gemini-4-hydrogen">gemini-4-hydrogen (Gemini 4 Flagship)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash</option>
               <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Recomendado)</option>
               <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-              <option value="gemma-4-31b-it">gemma-4-31b-it (14.4k req/día)</option>
               <option value="gemma-4-26b-a4b-it">gemma-4-26b-a4b-it</option>
               <option value="gemini-2.5-flash">gemini-2.5-flash</option>
               <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
             </select>
+          </div>
+          <div class="setting-group">
+            <label>Modelo del Elefante (The Elephant - Lore y Resúmenes)</label>
+            <select id="cfg-elephant-model">
+              <option value="gemini-4-hydrogen">gemini-4-hydrogen (Recomendado - Máximo Razonamiento)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+              <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+            </select>
+            <div class="setting-help">Se ejecuta 1-2 veces por capítulo para construir perfiles y continuidad.</div>
           </div>
           <div class="setting-group">
             <label>OpenRouter API Key</label>

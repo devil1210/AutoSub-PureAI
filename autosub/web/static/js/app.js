@@ -670,6 +670,10 @@ function loadSettingsForm() {
   document.getElementById('cfg-ollama-port').value = currentConfig.ollama_port || 11434;
   document.getElementById('cfg-gemini-key').value = currentConfig.gemini_api_key || '';
   document.getElementById('cfg-cloud-model').value = currentConfig.cloud_model || 'gemini-3.5-flash-lite';
+  const elModel = document.getElementById('cfg-elephant-model');
+  if (elModel) {
+    elModel.value = currentConfig.elephant_model || 'gemini-4-hydrogen';
+  }
   document.getElementById('cfg-or-key').value = currentConfig.openrouter_api_key || '';
   document.getElementById('cfg-enable-or').checked = currentConfig.enable_openrouter === true;
 
@@ -742,6 +746,7 @@ async function saveAllSettings() {
     local_model: document.getElementById('cfg-local-model').value,
     gemini_api_key: document.getElementById('cfg-gemini-key').value.trim(),
     cloud_model: document.getElementById('cfg-cloud-model').value,
+    elephant_model: document.getElementById('cfg-elephant-model') ? document.getElementById('cfg-elephant-model').value : 'gemini-4-hydrogen',
     openrouter_api_key: document.getElementById('cfg-or-key').value.trim(),
     enable_openrouter: document.getElementById('cfg-enable-or').checked,
     libraries: libraries,

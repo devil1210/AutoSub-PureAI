@@ -2,7 +2,7 @@ import datetime
 import json
 import os
 import re
-from autosub.config import PROFILES_DIR
+from autosub.config import PROFILES_DIR, app_config
 from autosub.core.metadata import fetch_anime_web_context
 from autosub.core.watcher import get_parsed_watch_paths
 from autosub.providers.gemini import call_ai
@@ -86,7 +86,8 @@ Genera un JSON con esta estructura exacta:
 Devuelve ÚNICAMENTE el bloque JSON.
 /no_think"""
 
-    resp = call_ai(prompt, system_instruction=sys_prompt, timeout=120, allow_cloud_override=True)
+    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
+    resp = call_ai(prompt, system_instruction=sys_prompt, timeout=120, allow_cloud_override=True, preferred_model=elephant_model)
     profile_data = None
     if resp:
         try:
@@ -177,7 +178,8 @@ Genera el JSON con el resumen, nuevos personajes, personajes con giros de trama 
 /no_think"""
 
     print(f"[Continuity] Analizando continuidad, personajes y giros de trama para {series_name} - {ep_label}...", flush=True)
-    raw_resp = call_ai(prompt, system_instruction=sys_prompt, timeout=90)
+    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
+    raw_resp = call_ai(prompt, system_instruction=sys_prompt, timeout=90, allow_cloud_override=True, preferred_model=elephant_model)
 
     summary_text = ""
     new_chars = []

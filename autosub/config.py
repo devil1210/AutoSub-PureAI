@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     "local_only": False,
     "local_model": "qwen3.5:9b",
     "cloud_model": "gemini-3.5-flash-lite",
+    "elephant_model": "gemini-4-hydrogen",
     "enable_openrouter": False,
     "batch_size": 100,
     "fast_mode": False,
@@ -103,7 +104,9 @@ OR_MODELS = [
 ]
 
 GEMINI_MODELS = [
-    "gemini-3.5-flash-lite",    # 500 req/día (15 RPM) - Principal
+    "gemini-4-hydrogen",       # Nuevo Gemini 4 - Máximo razonamiento y Lore
+    "gemini-3.8-flash",        # Respaldo alta gama
+    "gemini-3.5-flash-lite",    # 500 req/día (15 RPM) - Rápido para traducción masiva
     "gemini-3.1-flash-lite",    # 500 req/día (15 RPM) - Secundario
     "gemini-flash-lite-latest", # Fallback adicional
     "gemma-4-26b-a4b-it",       # 14.4K req/día (30 RPM) - Respaldo rápido
