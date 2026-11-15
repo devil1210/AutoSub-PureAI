@@ -18,13 +18,15 @@ def format_srt_text(raw_text: str) -> str:
     clean = clean.replace('\\N', '\n').replace('\\n', '\n').strip()
     return clean
 
-def save_ass_and_srt_outputs(out_ass_path, out_srt_path, original_ass_lines, dialogue_indices, final_texts):
+def save_ass_and_srt_outputs(out_ass_path, out_srt_path, original_ass_lines, dialogue_indices, final_texts, speakers=None):
     """Guarda los subtítulos ASS actualizados y genera el SRT correspondiente."""
     new_lines = list(original_ass_lines)
     for idx_dialogue, real_line_idx in enumerate(dialogue_indices):
         if idx_dialogue < len(final_texts):
             parts = new_lines[real_line_idx].split(",", 9)
             if len(parts) == 10:
+                if speakers and idx_dialogue < len(speakers) and speakers[idx_dialogue]:
+                    parts[4] = str(speakers[idx_dialogue]).strip()
                 new_lines[real_line_idx] = ",".join(parts[:9]) + "," + sanitize_subtitle_text(final_texts[idx_dialogue]) + "\n"
 
     with open(out_ass_path, "w", encoding="utf-8") as f:

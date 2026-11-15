@@ -21,6 +21,7 @@ from autosub.core.context import (
 )
 from autosub.core.history import format_duration, append_history_record
 from autosub.core.queue import enqueue_retry, save_persisted_queue
+from autosub.engine.diarization import attribute_episode_speakers
 from autosub.engine.elephant import extract_series_name, get_or_create_series_profile, generate_and_save_episode_context
 from autosub.engine.goldfish import (
     translate_batch,
@@ -428,12 +429,20 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 ctx.last_job_metrics["format"] = "Contexto (Pista Extraída)"
                 return True
 
+            # Identificación y atribución de hablantes (Diarization)
+            speakers = attribute_episode_speakers(video_path, src_texts, profile_data)
             ctx.last_job_metrics["lines_count"] = len(src_texts)
             ctx.last_job_metrics["format"] = "ASS + SRT" if source_data["is_ass"] else "SRT"
+            if speakers:
+                ctx.last_job_metrics["speakers_count"] = sum(1 for s in speakers if s)
 
             packaged_items = [
-                {"text": txt, "duration": dur}
-                for txt, dur in zip(source_data["texts"], source_data.get("durations", [0.0] * len(source_data["texts"])))
+                {"text": txt, "duration": dur, "speaker": spk}
+                for txt, dur, spk in zip(
+                    source_data["texts"],
+                    source_data.get("durations", [0.0] * len(source_data["texts"])),
+                    speakers if (speakers and len(speakers) == len(source_data["texts"])) else [""] * len(source_data["texts"])
+                )
             ]
             chunks = smart_boundary_slicing(packaged_items, min_chunk=20, max_chunk=35)
             total_batches = len(chunks)
@@ -459,13 +468,15 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
                 batch_texts = [it["text"] for it in chunk]
                 batch_durations = [it["duration"] for it in chunk]
+                batch_speakers = [it.get("speaker", "") for it in chunk]
                 trans = translate_atomic_batch(
                     batch_texts,
                     profile_data,
                     prev_context=prev_ctx,
                     target_lang=target_lang,
                     durations=batch_durations,
-                    proofread=proofread_enabled
+                    proofread=proofread_enabled,
+                    speakers=batch_speakers
                 )
                 if trans is None:
                     translation_success = False
@@ -482,7 +493,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
             ep_context = generate_and_save_episode_context(series_name, video_path, src_texts, translated_texts, profile_data, profile_path)
 
             if source_data["is_ass"]:
-                save_ass_and_srt_outputs(out_ass, out_srt, source_data["lines"], source_data["indices"], translated_texts)
+                save_ass_and_srt_outputs(out_ass, out_srt, source_data["lines"], source_data["indices"], translated_texts, speakers=speakers)
             else:
                 save_srt_output(out_srt, source_data["cues"], translated_texts)
 

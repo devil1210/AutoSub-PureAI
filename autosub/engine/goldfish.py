@@ -261,14 +261,15 @@ Corrige los defectos y devuelve la lista completa de {len(raw_texts)} líneas co
 
     return working_texts
 
-def translate_atomic_batch(batch_texts: list[str], profile_data: dict, prev_context: list[str] = None, target_lang: str = "es-419", durations: list[float] = None, proofread: bool = False) -> list[str]:
+def translate_atomic_batch(batch_texts: list[str], profile_data: dict, prev_context: list[str] = None, target_lang: str = "es-419", durations: list[float] = None, proofread: bool = False, speakers: list[str] = None) -> list[str]:
     """
     Traduce un lote atómico (The Goldfish, 20-35 cues) aplicando:
     1. Enmascaramiento de etiquetas AST (<T0>, <T1>).
     2. Briefing conciso de The Elephant (<= 350 tokens).
-    3. Validación determinista Tier 1 (conteo 1:1, preservación de tags, llaves, CPS).
-    4. Pulido condicional Tier 2 si se detectan defectos o proofread está activo.
-    5. Desenmascarado exacto de etiquetas AST.
+    3. Inyección de hablantes (Speaker Diarization) para calibrar tratamiento.
+    4. Validación determinista Tier 1 (conteo 1:1, preservación de tags, llaves, CPS).
+    5. Pulido condicional Tier 2 si se detectan defectos o proofread está activo.
+    6. Desenmascarado exacto de etiquetas AST.
     """
     if not batch_texts:
         return []
@@ -294,6 +295,10 @@ def translate_atomic_batch(batch_texts: list[str], profile_data: dict, prev_cont
     else:
         tag_rule = "1. MANTÉN los saltos de línea \\N en la posición adecuada. NO inventes etiquetas, pseudotags ni marcas de formato."
 
+    speaker_instruction = ""
+    if speakers and any(speakers):
+        speaker_instruction = "\n6. Si una línea indica el hablante entre paréntesis '(Personaje):', úsalo para fijar el tratamiento, género y formalidad. NUNCA repitas el nombre '(Personaje):' en la traducción final."
+
     sys_prompt = f"""Eres un traductor y adaptador profesional de subtítulos de anime al {prompt_lang}.
 {elephant_brief}
 ESTILO: {tone_info}
@@ -303,9 +308,17 @@ REGLAS CRÍTICAS:
 2. PRESERVA EL SENTIDO EXACTO: NUNCA inviertas afirmaciones ni negaciones.
 3. CONCORDANCIA Y NATURALIDAD: Respeta los géneros del contexto y evita calcos del inglés.
 4. Devuelve EXACTAMENTE la misma cantidad [{len(batch_texts)}] de líneas numeradas en formato: [N] Texto traducido.
-5. NO agregues notas, explicaciones ni saludos."""
+5. NO agregues notas, explicaciones ni saludos.{speaker_instruction}"""
 
-    numbered_input = "\n".join([f"[{i+1}] {t}" for i, t in enumerate(masked_batch)])
+    numbered_lines = []
+    for i, t in enumerate(masked_batch):
+        spk = speakers[i] if speakers and i < len(speakers) and speakers[i] else ""
+        if spk:
+            numbered_lines.append(f"[{i+1}] ({spk}): {t}")
+        else:
+            numbered_lines.append(f"[{i+1}] {t}")
+    numbered_input = "\n".join(numbered_lines)
+
     user_prompt = f"Traduce al {prompt_lang} respetando la numeración [1] a [{len(batch_texts)}] y los tokens de etiqueta:\n{numbered_input}\n/no_think"
 
     parsed_results = {}
@@ -320,7 +333,12 @@ REGLAS CRÍTICAS:
                 if m:
                     idx = int(m.group(1)) - 1
                     if 0 <= idx < len(batch_texts) and m.group(2).strip():
-                        parsed_results[idx] = m.group(2).strip()
+                        val = m.group(2).strip()
+                        if speakers and idx < len(speakers) and speakers[idx]:
+                            spk_esc = re.escape(speakers[idx])
+                            val = re.sub(r"^\s*\(?" + spk_esc + r"\)?\s*:\s*", "", val, flags=re.IGNORECASE)
+                        val = re.sub(r"^\s*\([A-Za-z0-9_\-\s]+\)\s*:\s*", "", val)
+                        parsed_results[idx] = val
 
             if len(parsed_results) >= len(batch_texts) * 0.7:
                 translated_masked = [parsed_results.get(i, masked_batch[i]) for i in range(len(batch_texts))]
@@ -359,9 +377,9 @@ REGLAS CRÍTICAS:
 
     return final_texts
 
-def translate_batch(text_list, profile_data, prev_context=None, target_lang="es-419", durations=None):
+def translate_batch(text_list, profile_data, prev_context=None, target_lang="es-419", durations=None, speakers=None):
     """Fachada compatible que delega en el motor atómico translate_atomic_batch."""
-    return translate_atomic_batch(text_list, profile_data, prev_context=prev_context, target_lang=target_lang, durations=durations)
+    return translate_atomic_batch(text_list, profile_data, prev_context=prev_context, target_lang=target_lang, durations=durations, speakers=speakers)
 
 def proofread_subtitles(raw_texts, translated_texts, profile_data, batch_size=100, episode_context=None, target_lang="es-419"):
     if not translated_texts or len(raw_texts) != len(translated_texts):
