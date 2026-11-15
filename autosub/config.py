@@ -104,10 +104,10 @@ OR_MODELS = [
 ]
 
 GEMINI_MODELS = [
-    "gemini-4-hydrogen",       # Nuevo Gemini 4 - Máximo razonamiento y Lore
-    "gemini-3.8-flash",        # Respaldo alta gama
+    "gemini-3.5-flash",         # Alta velocidad, excelente razonamiento y cuota amplia
     "gemini-3.5-flash-lite",    # 500 req/día (15 RPM) - Rápido para traducción masiva
-    "gemini-3.1-flash-lite",    # 500 req/día (15 RPM) - Secundario
+    "gemini-3.8-flash",         # Respaldo alta gama
+    "gemini-4-hydrogen",        # Nuevo Gemini 4 (sujeto a cuota diaria de preview)
     "gemini-flash-lite-latest", # Fallback adicional
     "gemma-4-26b-a4b-it",       # 14.4K req/día (30 RPM) - Respaldo rápido
 ]

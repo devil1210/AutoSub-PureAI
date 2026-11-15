@@ -5,19 +5,32 @@ from autosub.config import MAX_GEMINI_RPM, MIN_GEMINI_INTERVAL
 from autosub.core.context import next_gemini_lock, gemini_rate_lock, gemini_request_timestamps
 
 _next_gemini_allowed = 0.0
+_model_cooldowns = {}
 
 def get_next_gemini_allowed():
     global _next_gemini_allowed
     return _next_gemini_allowed
 
+def get_model_cooldown(model_name: str) -> float:
+    return _model_cooldowns.get(model_name, 0.0)
+
+def set_model_cooldown(model_name: str, delay_seconds: float):
+    candidate = time.time() + delay_seconds
+    if candidate > _model_cooldowns.get(model_name, 0.0):
+        _model_cooldowns[model_name] = candidate
+        print(f"[Gemini Cooldown] Modelo '{model_name}' bloqueado por {delay_seconds:.0f}s "
+              f"(hasta {time.strftime('%H:%M:%S', time.localtime(candidate))})", flush=True)
+
 def set_gemini_cooldown(delay_seconds):
     global _next_gemini_allowed
-    with next_gemini_lock:
-        candidate = time.time() + delay_seconds
-        if candidate > _next_gemini_allowed:
-            _next_gemini_allowed = candidate
-            print(f"[Gemini Cooldown] Bloqueado por {delay_seconds:.0f}s "
-                  f"(hasta {time.strftime('%H:%M:%S', time.localtime(_next_gemini_allowed))})", flush=True)
+    # Solo aplicar cooldown global si es una pausa corta de RPM (<= 120s)
+    if delay_seconds <= 120:
+        with next_gemini_lock:
+            candidate = time.time() + delay_seconds
+            if candidate > _next_gemini_allowed:
+                _next_gemini_allowed = candidate
+                print(f"[Gemini Cooldown] Pausa global de {delay_seconds:.0f}s "
+                      f"(hasta {time.strftime('%H:%M:%S', time.localtime(_next_gemini_allowed))})", flush=True)
 
 def get_retry_delay_from_error(err_body):
     try:

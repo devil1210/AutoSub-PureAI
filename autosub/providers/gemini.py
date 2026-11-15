@@ -9,6 +9,8 @@ from autosub.providers.openrouter import call_openrouter
 from autosub.providers.rate_limiter import (
     get_next_gemini_allowed,
     set_gemini_cooldown,
+    get_model_cooldown,
+    set_model_cooldown,
     get_retry_delay_from_error,
     wait_for_gemini_slot
 )
@@ -47,6 +49,10 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
     data = json.dumps(payload).encode("utf-8")
 
     for model_name in ordered:
+        cd = get_model_cooldown(model_name)
+        if time.time() < cd:
+            continue
+
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         for attempt in range(max_retries):
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
@@ -59,11 +65,16 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
                 body = err.read().decode("utf-8", errors="ignore")
                 if err.code == 429:
                     delay = get_retry_delay_from_error(body) or 20
-                    set_gemini_cooldown(delay)
-                    wait_sec = min(delay, 25)
-                    print(f"[Gemini RateLimit] ⚠️ 429 en {model_name}. Pausando {wait_sec}s antes de reintentar...", flush=True)
-                    time.sleep(wait_sec)
-                    continue
+                    if delay > 120:
+                        set_model_cooldown(model_name, delay)
+                        print(f"[Gemini Quota] ⚠️ Cuota diaria/horaria alcanzada en {model_name} ({delay}s). Saltando a siguiente modelo...", flush=True)
+                        break
+                    else:
+                        set_gemini_cooldown(delay)
+                        wait_sec = min(delay, 25)
+                        print(f"[Gemini RateLimit] ⚠️ 429 en {model_name}. Pausando {wait_sec}s antes de reintentar...", flush=True)
+                        time.sleep(wait_sec)
+                        continue
                 print(f"[Gemini Error] ⚠️ {model_name} HTTP {err.code}: {body[:250]}", flush=True)
                 time.sleep(2)
             except Exception as ex:
