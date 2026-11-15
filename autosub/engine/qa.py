@@ -28,6 +28,8 @@ CALQUE_TERMS = {
     r"\bhace sentido\b": "hace sentido (calco de 'makes sense', usar tiene sentido)",
     r"\ben adici[oó]n\b": "en adición (calco de 'in addition', usar además)",
     r"\bpara nada\b": "revisar uso de para nada (calco de 'not at all')",
+    r"\bpequeña señorita\b": "pequeña señorita (calco de 'little lady', usar señorita o jovencita)",
+    r"\bcrescí\b": "crescí (error ortográfico, usar crecí)",
 }
 
 def audit_technical_quality(translated_texts: List[str], durations: List[float] = None) -> Dict[str, Any]:

@@ -187,6 +187,13 @@ def clean_split_dialogue_punctuation(texts: list[str]) -> list[str]:
                     cleaned[i] = re.sub(r"^(\s*(?:\{.*?\}|<T\d+>)*)\s*¡\s*", r"\1", curr_txt)
                     continue
 
+    # Sanitización determinística de calcos y erratas comunes
+    for i in range(len(cleaned)):
+        t = cleaned[i]
+        t = re.sub(r"\b([Cc])resc([ií])\b", r"\1rec\2", t)
+        t = re.sub(r"\b[Pp]equeña\s+[Ss]eñorita\b", "señorita", t)
+        cleaned[i] = t
+
     return cleaned
 
 def tier2_proofread_batch(raw_texts: list[str], translated_texts: list[str], profile_data: dict, defects: list[dict], target_lang: str = "es-419", max_retries: int = 2) -> list[str]:

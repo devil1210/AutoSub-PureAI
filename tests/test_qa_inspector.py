@@ -41,5 +41,15 @@ class TestQAInspector(unittest.TestCase):
         self.assertTrue(res["overall_score"] >= 95.0)
         self.assertIn("Fidelidad", res["summary_line"])
 
+    def test_calque_and_typo_heuristics(self):
+        texts = [
+            "Crescí en una isla flotante.",
+            "pequeña señorita Liston.",
+            "Esto hace sentido."
+        ]
+        res = audit_linguistic_heuristics(texts)
+        self.assertTrue(res["score"] < 100.0)
+        self.assertEqual(res["calques_count"], 3)
+
 if __name__ == "__main__":
     unittest.main()
