@@ -105,3 +105,19 @@ When AutoSub encounters a media file for a requested target language (e.g. `es-4
    - Preserva al 100% las adaptaciones humanas nativas correctas (*eroge*, *prota*, *mal tercio*).
 4. **Fallback Automático:** Si no existe pista en el idioma objetivo, se selecciona la mejor pista fuente no forzada (`ja`, `en`, etc.) y se ejecuta la traducción tradicional + proofreading.
 
+---
+
+## 7. AutoSub Nightly Curator (03:00 AM Cron)
+
+- **Script Path:** `/opt/autosub_nightly_curator.py`
+- **Cron Schedule:** `0 3 * * * python3 /opt/autosub_nightly_curator.py >> /opt/autosub_curator.log 2>&1`
+- **Goal:** Consume unused Google AI Studio free tier quota (Hydrogen & 3.8 Flash) before the 05:00 AM daily reset (PST midnight).
+- **Dynamic Quota Harvesting:**
+  $$\text{budget} = \min\left(14, \max\left(0, 20 - \text{used\_today} - 2\right)\right)$$
+- **Candidate Prioritization:**
+  1. Known low QA scores ($< 80$).
+  2. Moderate QA scores ($80 - 89$, Aceptable).
+  3. Legacy subtitles without QA audit and without speaker diarization (`.ass` actor column is generic).
+- **Telegram Integration:** Sends summary notification when batch is enqueued.
+- **CLI Testing:** `python3 /opt/autosub_nightly_curator.py --dry-run`
+

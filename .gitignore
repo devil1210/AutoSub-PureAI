@@ -14,7 +14,18 @@ __pycache__/
 *_temp.*
 *_ctx_raw.*
 
-# Local data & runtimes
+# Local scratch & experiment files
+goldfish.b64
+goldfish_payload.json
+symfonium-theme/
+tools/analyze_missing.py
+tools/build_*.py
+tools/check_*.py
+tools/generate_*.py
+tools/inspect_*.py
+tools/read_*.py
+tools/send_*.py
+
 venv/
 .venv/
 env/

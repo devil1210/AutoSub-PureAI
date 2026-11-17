@@ -68,11 +68,11 @@ def attribute_dialogue_chunk(
     series_title: str,
     roster_summary: str,
     chunk_offset: int = 0,
-    model_name: str = "gemini-4-hydrogen"
+    model_name: str = "gemini-3.8-flash"
 ) -> List[str]:
     """
-    Atribuye el personaje hablante para un bloque de 25-40 líneas usando Gemini 4 Hydrogen.
-    Devuelve lista de nombres de longitud idéntica a chunk_texts.
+    Atribuye el personaje hablante para el guion completo (o bloque grande) usando Gemini 4 Hydrogen.
+    Utiliza indexación explícita [N] Nombre para evitar cualquier desfase por omisión.
     """
     count = len(chunk_texts)
     if count == 0:
@@ -81,8 +81,11 @@ def attribute_dialogue_chunk(
     numbered_lines = []
     for i, t in enumerate(chunk_texts):
         clean_t = re.sub(r"\{.*?\}", "", t).replace("\\N", " ").replace("\\n", " ").strip()
-        numbered_lines.append(f"[{i + 1}] {clean_t}")
+        numbered_lines.append(f"[{chunk_offset + i + 1}] {clean_t}")
     lines_block = "\n".join(numbered_lines)
+
+    first_no = chunk_offset + 1
+    last_no = chunk_offset + count
 
     sys_prompt = f"""Eres un experto supervisor editorial de guiones de anime y atribución de hablantes (speaker diarization).
 SERIE: {series_title}
@@ -91,37 +94,54 @@ ELENCO DE PERSONAJES:
 {roster_summary}
 - Extras / Multitud / Narrador
 
-Tu tarea es identificar qué personaje dice cada línea de diálogo a partir del contexto de la conversación.
+Tu tarea es identificar qué personaje dice cada línea de diálogo a partir del contexto continuo de toda la conversación del episodio.
 Reglas:
-1. Usa el nombre exacto del personaje según el elenco cuando sea posible (ej: 'Nia Liston', 'Rinokis', 'Neil', 'Leliared', 'Hilde', 'Sanowil').
+1. Usa el nombre exacto del personaje según el elenco cuando sea posible.
 2. Si es un personaje secundario o multitud, usa 'Extra', 'Multitud' o 'Narrador'.
-3. Si tienes duda razonable, usa el nombre más probable o déjalo vacío.
-4. Responde ÚNICAMENTE en formato JSON estricto con un arreglo 'speakers':
-{{"speakers": ["Personaje_1", "Personaje_2", ...]}}
-El arreglo 'speakers' DEBE tener EXACTAMENTE {count} elementos correspondientes a las líneas [1] a [{count}].
+3. Si la línea no es diálogo (es un cartel, título o sonido ambiente), responde vacío.
+4. Responde ÚNICAMENTE en formato numerado estricto línea por línea, de [{first_no}] a [{last_no}]:
+[{first_no}] Nombre_Personaje
+[{first_no + 1}] Nombre_Personaje
+...
+[{last_no}] Nombre_Personaje
+NO agregues explicaciones, notas ni saludos.
 /no_think"""
 
-    user_prompt = f"Identifica el hablante para cada una de las {count} líneas:\n{lines_block}"
+    user_prompt = f"Identifica el hablante para las líneas [{first_no}] a [{last_no}]:\n{lines_block}"
 
     for attempt in range(2):
-        resp = call_ai(user_prompt, system_instruction=sys_prompt, timeout=60, allow_cloud_override=True, preferred_model=model_name)
+        resp = call_ai(user_prompt, system_instruction=sys_prompt, timeout=120, allow_cloud_override=True, preferred_model=model_name)
         if resp:
-            try:
-                m = re.search(r"\{.*\}", resp, flags=re.DOTALL)
+            parsed = {}
+            for line in resp.strip().split("\n"):
+                m = re.match(r"^\[?(\d+)\]?[\.\:\)]?\s*(.*)$", line.strip())
                 if m:
-                    data = json.loads(m.group(0))
-                    spks = data.get("speakers", [])
-                    if isinstance(spks, list) and len(spks) == count:
-                        return [str(s).strip() if s else "" for s in spks]
-                    elif isinstance(spks, list) and len(spks) > 0:
-                        # Si difiere ligeramente en conteo, rellenar o truncar
-                        res = [str(s).strip() if s else "" for s in spks[:count]]
-                        while len(res) < count:
-                            res.append("")
-                        return res
-            except Exception:
-                pass
-        time.sleep(1)
+                    line_no = int(m.group(1))
+                    rel_idx = line_no - chunk_offset - 1
+                    spk = m.group(2).strip()
+                    spk = re.sub(r"^.*?:\s*", "", spk).strip()
+                    if spk.lower() in ["ninguno", "n/a", "none", "-", "cartel", "letrero", "título", "titulo"]:
+                        spk = ""
+                    if 0 <= rel_idx < count:
+                        parsed[rel_idx] = spk
+
+            # Si el modelo respondió en JSON fallback
+            if len(parsed) < count * 0.4:
+                try:
+                    m_json = re.search(r"\{.*\}", resp, flags=re.DOTALL)
+                    if m_json:
+                        data = json.loads(m_json.group(0))
+                        spks = data.get("speakers", [])
+                        if isinstance(spks, list):
+                            for idx, s in enumerate(spks[:count]):
+                                if idx not in parsed or not parsed[idx]:
+                                    parsed[idx] = str(s).strip() if s else ""
+                except Exception:
+                    pass
+
+            if len(parsed) >= count * 0.5:
+                return [parsed.get(i, "") for i in range(count)]
+        time.sleep(2)
 
     # Fallback si la llamada no responde: lista vacía
     return ["" for _ in range(count)]
@@ -133,7 +153,8 @@ def attribute_episode_speakers(
 ) -> List[str]:
     """
     Ejecuta o recupera de caché la atribución integral de personajes para un episodio.
-    Devuelve lista de nombres de personajes con len == len(raw_texts).
+    Envía el guion completo de corrido en 1 sola llamada (chunk_size=450) para máxima precisión
+    y mínimo consumo de cuota de The Elephant.
     """
     total = len(raw_texts)
     if total == 0:
@@ -148,11 +169,12 @@ def attribute_episode_speakers(
 
     series_title = profile_data.get("series_title", "Anime") if profile_data else "Anime"
     roster_summary = build_character_roster_summary(profile_data)
-    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
+    diarization_model = app_config.get("diarization_model", "gemini-3.8-flash")
 
-    print(f"[Diarization] Identificando hablantes para {total} líneas con {elephant_model}...", flush=True)
+    print(f"[Diarization] Identificando hablantes para {total} líneas en llamada global con {diarization_model}...", flush=True)
 
-    chunk_size = 35
+    # Enviar el episodio completo de golpe (450 líneas cubre un episodio normal de 24 min en 1 sola llamada)
+    chunk_size = 450
     all_speakers = []
 
     for start_idx in range(0, total, chunk_size):
@@ -162,7 +184,7 @@ def attribute_episode_speakers(
             series_title=series_title,
             roster_summary=roster_summary,
             chunk_offset=start_idx,
-            model_name=elephant_model
+            model_name=diarization_model
         )
         all_speakers.extend(chunk_speakers)
 

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import re
 import time
 from autosub.config import SUPPORTED_TARGET_LANGUAGES
@@ -192,6 +193,12 @@ def clean_split_dialogue_punctuation(texts: list[str]) -> list[str]:
         t = cleaned[i]
         t = re.sub(r"\b([Cc])resc([ií])\b", r"\1rec\2", t)
         t = re.sub(r"\b[Pp]equeña\s+[Ss]eñorita\b", "señorita", t)
+        t = re.sub(r"\bInconsiderad([asoe]s?)\b", r"Desconsiderad\1", t)
+        t = re.sub(r"\binconsiderad([asoe]s?)\b", r"desconsiderad\1", t)
+        t = re.sub(r"\balgo\s+[hl]isonjeiro\s+así\b", r"algún halago así", t, flags=re.IGNORECASE)
+        t = re.sub(r"\b[hl]isonjeir([ao]s?)\b", r"halagador\1", t, flags=re.IGNORECASE)
+        t = re.sub(r"^.*?=>\s*(?:\[\d+\]\s*)?", "", t)
+        t = t.replace("«", '"').replace("»", '"')
         cleaned[i] = t
 
     return cleaned
@@ -306,7 +313,12 @@ ESTILO: {tone_info}
 REGLAS CRÍTICAS:
 {tag_rule}
 2. PRESERVA EL SENTIDO EXACTO: NUNCA inviertas afirmaciones ni negaciones.
-3. CONCORDANCIA Y NATURALIDAD: Respeta los géneros del contexto y evita calcos del inglés.
+3. ESPAÑOL NEUTRO Y CALIDAD DE DOBLAJE:
+   - Cero calcos literales del inglés (ej. 'inconsiderate' -> 'desconsiderada', NUNCA 'inconsiderada'; 'flattery' -> 'halago/cumplido').
+   - Vocabulario real: Prohibido inventar palabras o usar morfología híbrida con portugués (cero portuñol).
+   - Coherencia de pronombres: Al traducir 'they/them', determina los sujetos del contexto previo (padre y madre = 'ellos').
+   - Naturalidad de doblaje: Formula frases fluidas y coloquiales acordes a la personalidad y edad de cada personaje.
+   - Puntuación: En español latino neutro usa siempre comillas dobles estándar (" ") y NUNCA comillas angulares (« »).
 4. Devuelve EXACTAMENTE la misma cantidad [{len(batch_texts)}] de líneas numeradas en formato: [N] Texto traducido.
 5. NO agregues notas, explicaciones ni saludos.{speaker_instruction}"""
 
@@ -334,6 +346,7 @@ REGLAS CRÍTICAS:
                     idx = int(m.group(1)) - 1
                     if 0 <= idx < len(batch_texts) and m.group(2).strip():
                         val = m.group(2).strip()
+                        val = re.sub(r"^.*?=>\s*(?:\[\d+\]\s*)?", "", val).strip()
                         if speakers and idx < len(speakers) and speakers[idx]:
                             spk_esc = re.escape(speakers[idx])
                             val = re.sub(r"^\s*\(?" + spk_esc + r"\)?\s*:\s*", "", val, flags=re.IGNORECASE)
@@ -355,9 +368,8 @@ REGLAS CRÍTICAS:
     defects = tier1_validate_batch(masked_batch, translated_masked, tag_maps=tag_maps, durations=durations)
 
     # 4. Tier 2: Conditional Proofreading
-    if defects or proofread:
-        if defects:
-            print(f"[Goldfish] ⚠️ Tier 1 detectó {len(defects)} defecto(s) en el lote. Activando Tier 2 Critic...", flush=True)
+    if defects and proofread:
+        print(f"[Goldfish] ⚠️ Tier 1 detectó {len(defects)} defecto(s) en el lote. Activando Tier 2 Critic...", flush=True)
         translated_masked = tier2_proofread_batch(masked_batch, translated_masked, profile_data, defects, target_lang=target_lang)
 
     # 5. AST Tag Unmasking con salvaguarda
@@ -565,6 +577,6 @@ REGLAS CRÍTICAS:
                         corrected_texts[global_idx] = corr
 
     if len(corrected_texts) != len(sub_texts):
-        return sub_texts
+        return clean_split_dialogue_punctuation(sub_texts)
 
-    return corrected_texts
+    return clean_split_dialogue_punctuation(corrected_texts)

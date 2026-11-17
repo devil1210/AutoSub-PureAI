@@ -2,7 +2,7 @@ import json
 import re
 import time
 from autosub.config import MAX_GEMINI_RPM, MIN_GEMINI_INTERVAL
-from autosub.core.context import next_gemini_lock, gemini_rate_lock, gemini_request_timestamps
+from autosub.core.context import next_gemini_lock, gemini_rate_lock, gemini_request_timestamps, elephant_request_timestamps
 
 _next_gemini_allowed = 0.0
 _model_cooldowns = {}
@@ -45,26 +45,37 @@ def get_retry_delay_from_error(err_body):
         pass
     return None
 
-def wait_for_gemini_slot():
-    """Garantiza que nunca se superen 10 RPM en ninguna ventana móvil de 60 segundos."""
+def wait_for_gemini_slot(is_elephant=False):
+    """
+    Garantiza que nunca se superen los límites de RPM:
+    - The Elephant (modelos de 5 RPM máx): controlado a 4 RPM, intervalo mín. 13s.
+    - The Goldfish (modelos de 15 RPM máx): controlado a 12 RPM, intervalo mín. 4.5s.
+    """
+    # The Elephant: Límite estricto de máximo 2 RPM (mínimo 32s de intervalo entre llamadas)
+    # The Goldfish: Límite conservador de 10 RPM (mínimo 6s de intervalo)
+    max_rpm = 2 if is_elephant else 10
+    min_interval = 32.0 if is_elephant else 6.0
+    ts_list = elephant_request_timestamps if is_elephant else gemini_request_timestamps
+
     with gemini_rate_lock:
         now = time.time()
-        while gemini_request_timestamps and now - gemini_request_timestamps[0] >= 60.0:
-            gemini_request_timestamps.pop(0)
+        while ts_list and now - ts_list[0] >= 60.0:
+            ts_list.pop(0)
 
-        if len(gemini_request_timestamps) >= MAX_GEMINI_RPM:
-            wait_time = 60.0 - (now - gemini_request_timestamps[0]) + 0.5
+        if len(ts_list) >= max_rpm:
+            wait_time = 60.0 - (now - ts_list[0]) + 0.5
             if wait_time > 0:
-                print(f"[Gemini RateLimiter] 🛡️ Protección de Cuota: alcanzadas {len(gemini_request_timestamps)}/{MAX_GEMINI_RPM} RPM. Pausando {wait_time:.1f}s para no saturar el límite...", flush=True)
+                tag = "🐘 The Elephant" if is_elephant else "🐟 The Goldfish"
+                print(f"[Gemini RateLimiter] 🛡️ {tag}: alcanzadas {len(ts_list)}/{max_rpm} RPM. Pausando {wait_time:.1f}s...", flush=True)
                 time.sleep(wait_time)
                 now = time.time()
-                while gemini_request_timestamps and now - gemini_request_timestamps[0] >= 60.0:
-                    gemini_request_timestamps.pop(0)
+                while ts_list and now - ts_list[0] >= 60.0:
+                    ts_list.pop(0)
 
-        if gemini_request_timestamps:
-            elapsed = now - gemini_request_timestamps[-1]
-            if elapsed < MIN_GEMINI_INTERVAL:
-                time.sleep(MIN_GEMINI_INTERVAL - elapsed)
+        if ts_list:
+            elapsed = now - ts_list[-1]
+            if elapsed < min_interval:
+                time.sleep(min_interval - elapsed)
                 now = time.time()
 
-        gemini_request_timestamps.append(now)
+        ts_list.append(now)

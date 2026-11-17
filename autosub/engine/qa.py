@@ -30,6 +30,7 @@ CALQUE_TERMS = {
     r"\bpara nada\b": "revisar uso de para nada (calco de 'not at all')",
     r"\bpequeña señorita\b": "pequeña señorita (calco de 'little lady', usar señorita o jovencita)",
     r"\bcrescí\b": "crescí (error ortográfico, usar crecí)",
+    r"\b[Mm]f(?:\.{2,3})?\b": "Mf... (interjección o calco no natural en español, usar Este... o Mmm...)",
 }
 
 def audit_technical_quality(translated_texts: List[str], durations: List[float] = None) -> Dict[str, Any]:
@@ -66,13 +67,13 @@ def audit_technical_quality(translated_texts: List[str], durations: List[float] 
         if text.count("{") != text.count("}"):
             unbalanced_brackets.append(idx + 1)
 
-        # 3. Puntuación duplicada (ej. ¿...? continuado)
+        # 3. Puntuación duplicada errónea (ej. ¡¡ o ¿¿ repetidos, permitiendo interrobang legítimo ¡¿ o ¿¡)
         clean = re.sub(r"\{.*?\}|<T\d+>", "", text).strip()
-        if re.search(r"¿.*¿", clean) or re.search(r"¡.*¡", clean):
+        if re.search(r"¡{2,}|¿{2,}", clean):
             duplicate_punctuation.append(idx + 1)
 
         # 4. Prefijos residuales del LLM
-        if re.search(r"^(?:\[\d+\]\s*)?(?:[A-Za-z0-9\-]+|Traducci[oó]n|Correcci[oó]n):\s*", text, flags=re.IGNORECASE):
+        if re.search(r"^(?:\[\d+\]\s*)?(?:[A-Za-z0-9\-]+|Traducci[oó]n|Correcci[oó]n):\s*", text, flags=re.IGNORECASE) or re.search(r"=>\s*\[\d+\]", text):
             raw_prefixes.append(idx + 1)
 
     avg_cps = round(sum(cps_values) / len(cps_values), 1) if cps_values else 0.0
@@ -231,8 +232,8 @@ Devuelve ÚNICAMENTE el bloque JSON.
 
 Devuelve el JSON con fidelity_score, naturalness_score, gender_score, verdict, editorial_summary y flagged_lines:"""
 
-    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
-    resp = call_ai(prompt, system_instruction=sys_prompt, timeout=60, allow_cloud_override=True, preferred_model=elephant_model)
+    qa_model = app_config.get("cloud_model", "gemini-3.5-flash-lite")
+    resp = call_ai(prompt, system_instruction=sys_prompt, timeout=60, allow_cloud_override=True, preferred_model=qa_model)
 
     if resp:
         try:
@@ -300,13 +301,17 @@ def run_full_subtitle_qa(
         grade = "EXCELENTE"
         badge = "🟢 Excelente"
         icon = "🏆"
-    elif overall_score >= 85.0:
+    elif overall_score >= 90.0:
         grade = "APROBADO"
         badge = "🟢 Aprobado"
         icon = "✅"
-    elif overall_score >= 70.0:
+    elif overall_score >= 80.0:
         grade = "ACEPTABLE"
-        badge = "🟡 Observaciones"
+        badge = "🟡 Aceptable"
+        icon = "👌"
+    elif overall_score >= 70.0:
+        grade = "OBSERVACIONES"
+        badge = "🟠 Observaciones"
         icon = "⚠️"
     else:
         grade = "REVISAR"

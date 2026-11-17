@@ -696,6 +696,18 @@ tr:hover td { background: rgba(255, 255, 255, 0.015); }
   border: 1px solid var(--amber-border);
 }
 
+.badge-yellow {
+  background: rgba(234, 179, 8, 0.12);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.25);
+}
+
+.badge-red {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
 .badge-gray {
   background: rgba(148, 163, 184, 0.1);
   color: #94a3b8;
