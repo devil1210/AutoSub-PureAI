@@ -79,9 +79,14 @@ def has_real_speakers(ass_path):
         pass
     return False
 
-def calculate_budget(history):
-    """Calcula cuántos episodios se pueden procesar de forma 100% segura esta noche considerando las claves disponibles."""
-    last_reset = get_last_reset_datetime()
+def calculate_budget(history, now=None):
+    """
+    Calcula cuántos episodios se pueden procesar de forma 100% segura esta noche,
+    ponderando tanto la cuota diaria restante como el tiempo físico disponible
+    hasta el corte de seguridad de las 04:30 AM (para no sobrepasar el reinicio de las 05:00 AM).
+    """
+    now = now or datetime.datetime.now()
+    last_reset = get_last_reset_datetime(now)
     last_reset_str = last_reset.strftime("%Y-%m-%d %H:%M:%S")
 
     used_today = 0
@@ -104,9 +109,20 @@ def calculate_budget(history):
 
     remaining_quota = max(0, daily_quota_limit - used_today)
     usable_quota = max(0, remaining_quota - safety_buffer)
-    budget = min(max_nightly_batch, usable_quota)
 
-    return budget, used_today, remaining_quota, daily_quota_limit
+    # Cálculo de ventana física de tiempo hasta las 04:30 AM
+    if now.hour >= 5:
+        cutoff_time = (now + datetime.timedelta(days=1)).replace(hour=4, minute=30, second=0, microsecond=0)
+    else:
+        cutoff_time = now.replace(hour=4, minute=30, second=0, microsecond=0)
+
+    minutes_left = max(0.0, (cutoff_time - now).total_seconds() / 60.0)
+    # A un promedio de 6.5 min por episodio con lotes optimizados
+    episodes_by_time = int(minutes_left / 6.5)
+
+    budget = min(usable_quota, max_nightly_batch, episodes_by_time)
+
+    return budget, used_today, remaining_quota, daily_quota_limit, minutes_left, episodes_by_time
 
 def evaluate_existing_subtitle_qa(ass_path, profile_data=None):
     """Evalúa un subtítulo existente de forma 100% local (0 tokens) para obtener su nota QA."""
@@ -450,16 +466,17 @@ def main():
     with open(HISTORY_FILE, "r", encoding="utf-8") as f:
         history = json.load(f)
 
-    budget, used_today, remaining_quota, daily_quota_limit = calculate_budget(history)
+    budget, used_today, remaining_quota, daily_quota_limit, minutes_left, episodes_by_time = calculate_budget(history, now=now)
     print(f"[Curator] Estado de Cuota de Hoy (desde 05:00 AM):", flush=True)
     print(f"  - Episodios procesados hoy: {used_today} / {daily_quota_limit}", flush=True)
-    print(f"  - Cuota restante a consumir: {remaining_quota} llamadas", flush=True)
-    print(f"  - Presupuesto autorizado esta noche: {budget} episodios", flush=True)
+    print(f"  - Cuota restante disponible: {remaining_quota} llamadas", flush=True)
+    print(f"  - Tiempo útil hasta corte (04:30 AM): {minutes_left:.0f} min (~{episodes_by_time} episodios físicos)", flush=True)
+    print(f"  - Presupuesto autorizado esta sesión: {budget} episodios", flush=True)
 
     if budget <= 0 and not force_run:
-        msg = f"🌙 <b>AutoSub Curador Nocturno</b>\nSe alcanzó el límite de seguridad diario ({used_today}/{daily_quota_limit} procesados hoy). Esta noche no se encolarán tareas para proteger la cuota."
+        msg = f"🌙 <b>AutoSub Curador Nocturno (21:00)</b>\nLímite de seguridad alcanzado o ventana de tiempo insuficiente ({used_today}/{daily_quota_limit} hoy, {minutes_left:.0f} min restantes). Operación pausada."
         print(f"[Curator] {msg}", flush=True)
-        if not dry_run and now.hour == 3:
+        if not dry_run and now.hour == 21:
             send_telegram(msg)
         return
 
@@ -498,9 +515,9 @@ def main():
             items_str += f"\n• ...y {len(candidates) - 5} episodio(s) más."
 
         tg_msg = (
-            f"🌙 <b>AutoSub Curador Nocturno (03:00 AM)</b>\n"
+            f"🌙 <b>AutoSub Curador Nocturno (21:00)</b>\n"
             f"Se han encolado <b>{len(candidates)} episodios</b> de las series en emisión activadas:\n"
-            f"<i>(Cuota restante: {remaining_quota} RPD | Reset: 05:00 AM)</i>\n\n"
+            f"<i>(Cuota restante: {remaining_quota} RPD | Ventana hasta 04:30 AM | Reset: 05:00 AM)</i>\n\n"
             f"<b>Episodios seleccionados:</b>\n{items_str}"
         )
         send_telegram(tg_msg)

@@ -67,10 +67,28 @@ def enqueue_retry(video_path, force, series_name, error_reason="", increment_att
             retry_queue[video_path]["next_retry_at"] = time.time() + backoff
         save_persisted_queue()
 
+def check_quota_guard():
+    """
+    Si estamos en la ventana crítica de 04:30 AM a 05:05 AM, pausa el worker
+    para evitar que tareas en cola consuman la cuota diaria fresca que Google reinicia a las 05:00 AM.
+    """
+    import datetime
+    now = datetime.datetime.now()
+    if (now.hour == 4 and now.minute >= 30) or (now.hour == 5 and now.minute < 5):
+        print(f"[QuotaGuard] 🛑 Ventana crítica de corte (04:30 - 05:05 AM). Hora actual: {now.strftime('%H:%M:%S')}. "
+              f"Pausando cola para proteger el reinicio de cuota de las 05:00 AM...", flush=True)
+        while True:
+            time.sleep(15)
+            n = datetime.datetime.now()
+            if not ((n.hour == 4 and n.minute >= 30) or (n.hour == 5 and n.minute < 5)):
+                break
+        print(f"[QuotaGuard] 🌅 Cuota de Google reiniciada con éxito (05:00 AM). Reanudando cola con cuota 100% fresca.", flush=True)
+
 def queue_worker(process_file_fn):
     while True:
         try:
             item = job_queue.get()
+            check_quota_guard()
             if len(item) == 4:
                 v_path, force, context_only, target_langs = item
             elif len(item) == 3:

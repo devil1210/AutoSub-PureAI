@@ -531,12 +531,16 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     speakers if (speakers and len(speakers) == len(source_data["texts"])) else [""] * len(source_data["texts"])
                 )
             ]
-            chunks = smart_boundary_slicing(packaged_items, min_chunk=20, max_chunk=35)
+            # Lotes optimizados de 40-60 cues para máxima velocidad y coherencia contextual
+            base_b = app_config.get("batch_size", 50)
+            target_max = min(60, max(40, base_b))
+            target_min = max(25, int(target_max * 0.65))
+            chunks = smart_boundary_slicing(packaged_items, min_chunk=target_min, max_chunk=target_max)
             total_batches = len(chunks)
             with processing_lock:
                 ctx.current_total_batches = total_batches * num_targets
 
-            print(f"[AutoSub] ({lang_idx+1}/{num_targets}) Traduciendo al {lang_name} ({target_lang}) en {total_batches} lotes atómicos EGM (20-35 cues)...", flush=True)
+            print(f"[AutoSub] ({lang_idx+1}/{num_targets}) Traduciendo al {lang_name} ({target_lang}) en {total_batches} lotes optimizados EGM ({target_min}-{target_max} cues)...", flush=True)
 
             translated_texts = []
             prev_ctx = None
