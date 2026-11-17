@@ -308,7 +308,9 @@ function renderHistoryTable(records) {
       if (r.qa_score < 70) bClass = 'badge-red';
       else if (r.qa_score < 80) bClass = 'badge-amber';
       else if (r.qa_score < 90) bClass = 'badge-yellow';
-      qaBadge = `<span class="badge ${bClass}" title="${r.qa_summary || ''}">${r.qa_badge || (r.qa_score + '%')}</span>`;
+      const numScore = typeof r.qa_score === 'number' ? Math.round(r.qa_score * 10) / 10 : r.qa_score;
+      const displayTxt = r.qa_badge ? `${r.qa_badge} (${numScore})` : `${numScore} / 100`;
+      qaBadge = `<span class="badge ${bClass}" title="${r.qa_summary || ''}" style="white-space:nowrap; font-weight:600;">${displayTxt}</span>`;
     }
 
     return `
