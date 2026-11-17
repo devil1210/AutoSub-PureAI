@@ -8,21 +8,7 @@ import threading
 import time
 import urllib.parse
 from autosub.config import app_config, save_config, get_ollama_ip, PROFILES_DIR
-from autosub.core.context import (
-    currently_processing,
-    current_file_start_time,
-    current_batch_num,
-    current_total_batches,
-    total_processing_time_sec,
-    completed_jobs_count,
-    cancel_current_flag,
-    processing_lock,
-    cancel_lock,
-    config_lock,
-    queue_lock,
-    job_queue,
-    retry_queue
-)
+import autosub.core.context as ctx
 from autosub.core.history import load_history, save_history, format_duration
 from autosub.core.queue import save_persisted_queue
 from autosub.core.watcher import get_parsed_watch_paths
@@ -35,25 +21,34 @@ STATIC_DIR = os.path.join(WEB_DIR, "static")
 TEMPLATES_DIR = os.path.join(WEB_DIR, "templates")
 
 def build_status_dict():
-    with processing_lock:
-        current = currently_processing
-        st = current_file_start_time
-        b_num = current_batch_num
-        t_batches = current_total_batches
-        tot_time = total_processing_time_sec
-        jobs_done = completed_jobs_count
+    with ctx.processing_lock:
+        current = ctx.currently_processing
+        st = ctx.current_file_start_time
+        b_num = ctx.current_batch_num
+        t_batches = ctx.current_total_batches
+        tot_time = ctx.total_processing_time_sec
+        jobs_done = ctx.completed_jobs_count
+        stage = getattr(ctx, "current_stage", "")
+        stage_badge = getattr(ctx, "current_stage_badge", "")
+        stage_pct = getattr(ctx, "current_stage_percent", 0)
+        stage_detail = getattr(ctx, "current_stage_detail", "")
 
     elapsed_current = time.time() - st if current and st > 0 else 0.0
-    progress_pct = int((b_num / t_batches) * 100) if t_batches > 0 else 0
+    if stage_pct > 0:
+        progress_pct = max(0, min(100, int(stage_pct)))
+    elif t_batches > 0:
+        progress_pct = max(0, min(100, int((b_num / t_batches) * 100)))
+    else:
+        progress_pct = 0
 
     pc_online = is_ollama_alive(timeout=0.6, use_cache=True)
 
-    with queue_lock:
-        retry_items = list(retry_queue.values())
+    with ctx.queue_lock:
+        retry_items = list(ctx.retry_queue.values())
 
     active_jobs_list = []
-    with job_queue.mutex:
-        for idx, item in enumerate(job_queue.queue):
+    with ctx.job_queue.mutex:
+        for idx, item in enumerate(ctx.job_queue.queue):
             c_only = item[2] if len(item) > 2 else False
             t_langs = item[3] if len(item) > 3 else None
             active_jobs_list.append({
@@ -71,8 +66,8 @@ def build_status_dict():
             if fn.endswith(".json"):
                 profiles_list.append(fn[:-5])
 
-    with cancel_lock:
-        is_cancelling = cancel_current_flag
+    with ctx.cancel_lock:
+        is_cancelling = ctx.cancel_current_flag
 
     history_list = load_history()
     mkv_ok, mkvmerge_p, mkvextract_p = check_mkvtoolnix()
@@ -95,13 +90,16 @@ def build_status_dict():
             "currently_processing": current or "Ninguno",
             "current_elapsed_sec": elapsed_current,
             "current_elapsed_formatted": format_duration(elapsed_current),
+            "current_stage": stage,
+            "current_stage_badge": stage_badge,
+            "current_stage_detail": stage_detail,
             "current_batch": b_num,
             "total_batches": t_batches,
             "progress_percent": progress_pct,
             "total_processing_time_sec": tot_time,
             "total_processing_time_formatted": format_duration(tot_time),
             "completed_jobs_count": jobs_done,
-            "active_queue_count": job_queue.qsize(),
+            "active_queue_count": ctx.job_queue.qsize(),
             "profiles_count": len(profiles_list),
             "profiles": profiles_list,
             "cancelling": is_cancelling,
@@ -330,12 +328,12 @@ class AutoSubHandler(BaseHTTPRequestHandler):
         if clean_path == "/api/cancel_queue_item":
             path_to_remove = payload.get("path", "").strip()
             if path_to_remove:
-                with queue_lock:
-                    if path_to_remove in retry_queue:
-                        del retry_queue[path_to_remove]
+                with ctx.queue_lock:
+                    if path_to_remove in ctx.retry_queue:
+                        del ctx.retry_queue[path_to_remove]
                         save_persisted_queue()
-                with job_queue.mutex:
-                    job_queue.queue = collections.deque(item for item in job_queue.queue if item[0] != path_to_remove)
+                with ctx.job_queue.mutex:
+                    ctx.job_queue.queue = collections.deque(item for item in ctx.job_queue.queue if item[0] != path_to_remove)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -351,10 +349,10 @@ class AutoSubHandler(BaseHTTPRequestHandler):
             return
 
         if clean_path == "/api/config":
-            with config_lock:
-                for k in ["local_only", "local_model", "cloud_model", "enable_openrouter", "batch_size",
+            with ctx.config_lock:
+                for k in ["local_only", "local_model", "cloud_model", "elephant_model", "diarization_model", "enable_openrouter", "batch_size",
                           "fast_mode", "proofread", "audit_existing", "ollama_ip", "ollama_port", "gemini_api_key",
-                          "openrouter_api_key", "watch_paths", "libraries", "source_priority", "target_languages"]:
+                          "openrouter_api_key", "watch_paths", "libraries", "source_priority", "target_languages", "curator_whitelist"]:
                     if k in payload:
                         app_config[k] = payload[k]
                 save_config(app_config)
@@ -362,6 +360,24 @@ class AutoSubHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"status": "ok", "config": app_config}).encode("utf-8"))
+            return
+
+        if clean_path == "/api/curator_toggle":
+            series = payload.get("series", "").strip()
+            enabled = bool(payload.get("enabled", False))
+            with ctx.config_lock:
+                whitelist = list(app_config.get("curator_whitelist", []))
+                if enabled:
+                    if series and series not in whitelist:
+                        whitelist.append(series)
+                else:
+                    whitelist = [s for s in whitelist if s != series]
+                app_config["curator_whitelist"] = whitelist
+                save_config(app_config)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "curator_whitelist": whitelist, "series": series, "enabled": enabled}).encode("utf-8"))
             return
 
         if clean_path == "/api/profile/save":
@@ -426,7 +442,7 @@ class AutoSubHandler(BaseHTTPRequestHandler):
                 for p in paths:
                     p_clean = str(p).strip()
                     if p_clean and os.path.exists(p_clean):
-                        job_queue.put((p_clean, force, context_only, target_languages))
+                        ctx.job_queue.put((p_clean, force, context_only, target_languages))
                         enqueued += 1
             mode_lbl = "Solo Contexto" if context_only else f"Traducción {target_languages or app_config.get('target_languages', ['es-419'])}"
             print(f"[AutoSub] Encolados masivamente {enqueued} archivos ({mode_lbl}, force={force}).", flush=True)
@@ -451,7 +467,7 @@ class AutoSubHandler(BaseHTTPRequestHandler):
         if event_type in ["Download", "Upgrade", "EpisodeFileImport", "FileImport"]:
             file_path = payload.get("episodeFile", {}).get("path")
             if file_path:
-                job_queue.put((file_path, force))
+                ctx.job_queue.put((file_path, force))
 
         elif "path" in payload:
             path = payload["path"]
@@ -461,9 +477,9 @@ class AutoSubHandler(BaseHTTPRequestHandler):
                         for root, _, files in os.walk(p):
                             for file in sorted(files):
                                 if file.lower().endswith((".mkv", ".mp4")):
-                                    job_queue.put((os.path.join(root, file), f))
+                                    ctx.job_queue.put((os.path.join(root, file), f))
                     else:
-                        job_queue.put((p, f))
+                        ctx.job_queue.put((p, f))
                 except Exception as ex:
                     print(f"[AutoSub] Error encolando path '{p}': {ex}", flush=True)
             import threading

@@ -67,9 +67,41 @@ async function pollStatus() {
     const pBox = document.getElementById('progress-box');
     if (m.currently_processing && m.currently_processing !== 'Ninguno') {
       pBox.style.display = 'block';
-      document.getElementById('progress-title').innerText = 'Lote ' + m.current_batch + ' de ' + m.total_batches;
-      document.getElementById('progress-percentage').innerText = m.progress_percent + '%';
-      document.getElementById('progress-bar').style.width = m.progress_percent + '%';
+      const stageBadge = document.getElementById('progress-stage-badge');
+      if (stageBadge) {
+        stageBadge.innerText = m.current_stage_badge || 'En curso';
+        if (m.current_stage_badge === 'Extracción') {
+          stageBadge.className = 'badge badge-blue';
+        } else if (m.current_stage_badge === 'Diarización') {
+          stageBadge.className = 'badge badge-amber';
+        } else if (m.current_stage_badge === 'Traducción') {
+          stageBadge.className = 'badge badge-purple';
+        } else if (m.current_stage_badge === 'Continuidad') {
+          stageBadge.className = 'badge badge-blue';
+        } else if (m.current_stage_badge === 'Control QA') {
+          stageBadge.className = 'badge badge-green';
+        } else {
+          stageBadge.className = 'badge badge-purple';
+        }
+      }
+
+      const pTitle = document.getElementById('progress-title');
+      if (pTitle) {
+        pTitle.innerText = m.current_stage || (m.total_batches > 0 ? ('Lote ' + m.current_batch + ' de ' + m.total_batches) : 'Procesando...');
+      }
+
+      const pct = m.progress_percent !== undefined ? m.progress_percent : 0;
+      document.getElementById('progress-percentage').innerText = pct + '%';
+      document.getElementById('progress-bar').style.width = pct + '%';
+
+      const pLeft = document.getElementById('progress-sub-left');
+      const pRight = document.getElementById('progress-sub-right');
+      if (pLeft) {
+        pLeft.innerText = m.current_stage_detail || (m.total_batches > 0 ? ('Lote ' + m.current_batch + ' de ' + m.total_batches) : 'Preparando...');
+      }
+      if (pRight) {
+        pRight.innerText = m.current_elapsed_formatted || '0s';
+      }
     } else {
       pBox.style.display = 'none';
     }
@@ -174,6 +206,7 @@ async function loadMediaCatalog() {
 async function onCatalogItemSelected() {
   const path = document.getElementById('media-catalog-select').value;
   const container = document.getElementById('media-files-list');
+  updateMainCuratorButton();
   if (!path) {
     container.innerHTML = '<div style="color:var(--text-muted); font-size:13px; padding:10px;">Selecciona una serie o película arriba.</div>';
     return;
@@ -272,8 +305,9 @@ function renderHistoryTable(records) {
     let qaBadge = '<span class="badge badge-gray">-</span>';
     if (r.qa_score !== undefined && r.qa_score !== null) {
       let bClass = 'badge-green';
-      if (r.qa_score < 75) bClass = 'badge-red';
-      else if (r.qa_score < 85) bClass = 'badge-yellow';
+      if (r.qa_score < 70) bClass = 'badge-red';
+      else if (r.qa_score < 80) bClass = 'badge-amber';
+      else if (r.qa_score < 90) bClass = 'badge-yellow';
       qaBadge = `<span class="badge ${bClass}" title="${r.qa_summary || ''}">${r.qa_badge || (r.qa_score + '%')}</span>`;
     }
 
@@ -334,22 +368,183 @@ async function clearHistory() {
   }
 }
 
-// === TAB 3: PERFILES ===
+// === TAB 3: PERFILES Y CURADOR NOCTURNO ===
+let allLoadedProfiles = [];
+
 async function loadProfilesCatalog() {
   try {
     const res = await fetch('/api/profiles');
     const data = await res.json();
-    const profiles = data.profiles || [];
+    allLoadedProfiles = data.profiles || [];
     const sel = document.getElementById('profile-selector');
-    sel.innerHTML = '<option value="">-- Seleccionar Perfil --</option>' +
-      profiles.map(p => `<option value="${p.name}">[${p.characters_count} chars] ${p.name}</option>`).join('');
+    if (sel) {
+      sel.innerHTML = '<option value="">-- Seleccionar Perfil --</option>' +
+        allLoadedProfiles.map(p => `<option value="${p.name}">[${p.characters_count} chars] ${p.name}</option>`).join('');
+    }
+    renderCuratorSeriesPills(allLoadedProfiles);
+    updateProfileCuratorSwitch();
   } catch (err) {
     console.error(err);
   }
 }
 
+function onCuratorAddSelect(seriesName) {
+  if (!seriesName) return;
+  toggleCuratorSeries(seriesName, true);
+  const sel = document.getElementById('curator-add-select');
+  if (sel) sel.value = '';
+}
+
+function renderCuratorSeriesPills(profiles) {
+  const container = document.getElementById('curator-active-chips') || document.getElementById('curator-series-pills');
+  const addSelect = document.getElementById('curator-add-select');
+  const whitelist = currentConfig.curator_whitelist || [];
+
+  const countBadge = document.getElementById('curator-whitelist-count-badge');
+  if (countBadge) {
+    countBadge.innerText = `${whitelist.length} ${whitelist.length === 1 ? 'serie activa' : 'series activas'}`;
+    countBadge.className = whitelist.length > 0 ? 'badge badge-green' : 'badge badge-gray';
+  }
+
+  // Populate Add Select with series not in whitelist
+  if (addSelect && profiles && profiles.length > 0) {
+    const unselected = profiles
+      .filter(p => !whitelist.includes(p.name))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    let optionsHtml = '<option value="">➕ Añadir serie a revisión nocturna...</option>';
+    if (unselected.length === 0) {
+      optionsHtml += '<option value="" disabled>(Todas las series ya están añadidas)</option>';
+    } else {
+      unselected.forEach(p => {
+        const escVal = p.name.replace(/"/g, '&quot;');
+        optionsHtml += `<option value="${escVal}">+ ${p.name}</option>`;
+      });
+    }
+    addSelect.innerHTML = optionsHtml;
+    addSelect.value = '';
+  }
+
+  if (!container) return;
+
+  if (whitelist.length === 0) {
+    container.innerHTML = '<span style="color:var(--text-muted); font-size:12px; font-style:italic;">Ninguna serie activa en el curador nocturno. Selecciona una en el desplegable superior para incluirla.</span>';
+    return;
+  }
+
+  container.innerHTML = whitelist.map(name => {
+    const escName = name.replace(/'/g, "\\'");
+    const dispName = name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `
+      <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.45); color:#34d399; padding:4px 10px; border-radius:18px; font-size:12px; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.2);">
+        <span style="font-size:11px;">✓</span>
+        <span>${dispName}</span>
+        <button type="button" onclick="toggleCuratorSeries('${escName}', false)"
+          style="background:transparent; border:none; color:rgba(255,255,255,0.6); cursor:pointer; font-size:13px; font-weight:bold; line-height:1; padding:0 3px; margin-left:4px; display:inline-flex; align-items:center; border-radius:50%;"
+          onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='rgba(255,255,255,0.6)'"
+          title="Quitar '${dispName}' de la revisión nocturna">
+          ✕
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function toggleCuratorSeries(seriesName, enable) {
+  if (!seriesName) return;
+  try {
+    const res = await fetch('/api/curator_toggle', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({series: seriesName, enabled: enable})
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      currentConfig.curator_whitelist = data.curator_whitelist || [];
+      showToast(enable ? `🌙 '${seriesName}' activada para remasterización nocturna` : `⚪ '${seriesName}' desactivada`);
+      renderCuratorSeriesPills(allLoadedProfiles);
+      updateProfileCuratorSwitch();
+      updateMainCuratorButton();
+    }
+  } catch (err) {
+    console.error("Error toggle curator series:", err);
+  }
+}
+
+function updateProfileCuratorSwitch() {
+  const sel = document.getElementById('profile-selector');
+  const wrap = document.getElementById('prof-curator-wrap');
+  if (!sel || !wrap) return;
+  const name = sel.value;
+  if (!name) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'inline-flex';
+  const whitelist = currentConfig.curator_whitelist || [];
+  const isWhitelisted = whitelist.includes(name);
+  const sw = document.getElementById('prof-curator-switch');
+  const badge = document.getElementById('prof-curator-badge');
+  if (sw) sw.checked = isWhitelisted;
+  if (badge) {
+    badge.innerText = isWhitelisted ? 'Activa' : 'Inactiva';
+    badge.className = isWhitelisted ? 'badge badge-green' : 'badge badge-gray';
+  }
+}
+
+function toggleCuratorCurrentProfile(checked) {
+  const name = document.getElementById('profile-selector').value;
+  if (!name) return;
+  toggleCuratorSeries(name, checked);
+}
+
+function getSelectedCatalogSeriesName() {
+  const sel = document.getElementById('media-catalog-select');
+  if (!sel || !sel.value) return null;
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt) return null;
+  const rawText = opt.innerText || '';
+  const m = rawText.match(/^\[.*?\]\s*(.*)$/);
+  return m ? m[1].trim() : rawText.trim();
+}
+
+function updateMainCuratorButton() {
+  const btn = document.getElementById('btn-curator-quick');
+  if (!btn) return;
+  const seriesName = getSelectedCatalogSeriesName();
+  if (!seriesName) {
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = 'inline-flex';
+  const whitelist = currentConfig.curator_whitelist || [];
+  const isWhitelisted = whitelist.includes(seriesName);
+  const icon = document.getElementById('curator-quick-icon');
+  const txt = document.getElementById('curator-quick-text');
+  if (isWhitelisted) {
+    btn.className = 'btn btn-success btn-sm';
+    if (icon) icon.innerText = '🌙';
+    if (txt) txt.innerText = 'Curador 3 AM (Activa)';
+    btn.title = `Haz clic para DESACTIVAR '${seriesName}' del curador nocturno`;
+  } else {
+    btn.className = 'btn btn-secondary btn-sm';
+    if (icon) icon.innerText = '⚪';
+    if (txt) txt.innerText = 'Activar Curador 3 AM';
+    btn.title = `Haz clic para ACTIVAR '${seriesName}' en el curador nocturno`;
+  }
+}
+
+function toggleCuratorMainSeries() {
+  const seriesName = getSelectedCatalogSeriesName();
+  if (!seriesName) return;
+  const whitelist = currentConfig.curator_whitelist || [];
+  const isWhitelisted = whitelist.includes(seriesName);
+  toggleCuratorSeries(seriesName, !isWhitelisted);
+}
+
 async function onProfileSelected() {
   const name = document.getElementById('profile-selector').value;
+  updateProfileCuratorSwitch();
   if (!name) return;
   try {
     const res = await fetch('/api/profile?name=' + encodeURIComponent(name));

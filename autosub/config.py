@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     "local_model": "qwen3.5:9b",
     "cloud_model": "gemini-3.5-flash-lite",
     "elephant_model": "gemini-4-hydrogen",
+    "diarization_model": "gemini-3.8-flash",
     "enable_openrouter": False,
     "batch_size": 100,
     "fast_mode": False,
@@ -65,7 +66,8 @@ DEFAULT_CONFIG = {
     ],
     "watch_paths": ["/data/tvshows", "/data/movies"],
     "source_priority": ["ja", "en", "fr", "de", "es", "it", "pt", "ru", "zh"],
-    "target_languages": ["es-419"]
+    "target_languages": ["es-419"],
+    "curator_whitelist": ["Nia Liston - The Merciless Maiden"]
 }
 
 SUPPORTED_TARGET_LANGUAGES = {
@@ -103,13 +105,25 @@ OR_MODELS = [
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
 ]
 
+ELEPHANT_MODELS = [
+    "gemini-4-hydrogen",        # 20 RPD / 5 RPM - Máxima inteligencia para Continuidad y Perfil de Serie
+    "gemini-3.7-flash",         # Respaldo alta gama
+    "gemini-3.6-flash",         # Respaldo alta fidelidad
+    "gemini-3-flash",           # Respaldo probado (19 disponibles hoy)
+]
+
+DIARIZATION_MODELS = [
+    "gemini-3.8-flash",         # 20 RPD / 5 RPM - Flash ultra-rápido y estructurado para Diarización
+    "gemini-3.7-flash",         # Respaldo alta gama
+    "gemini-3.6-flash",         # Respaldo alta fidelidad
+    "gemini-4-hydrogen",        # Respaldo final
+]
+
 GEMINI_MODELS = [
-    "gemini-3.5-flash",         # Alta velocidad, excelente razonamiento y cuota amplia
-    "gemini-3.5-flash-lite",    # 500 req/día (15 RPM) - Rápido para traducción masiva
-    "gemini-3.8-flash",         # Respaldo alta gama
-    "gemini-4-hydrogen",        # Nuevo Gemini 4 (sujeto a cuota diaria de preview)
-    "gemini-flash-lite-latest", # Fallback adicional
-    "gemma-4-26b-a4b-it",       # 14.4K req/día (30 RPM) - Respaldo rápido
+    "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Rápido, alta cuota para The Goldfish
+    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Respaldo Lite (496 disponibles hoy)
+    "gemma-4-31b-it",           # 14.4K RPD / 30 RPM - Respaldo masivo ilimitado
+    "gemma-4-26b-a4b-it",       # 14.4K RPD / 30 RPM
 ]
 
 MAX_GEMINI_RPM = 10
