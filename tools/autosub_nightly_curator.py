@@ -80,7 +80,7 @@ def has_real_speakers(ass_path):
     return False
 
 def calculate_budget(history):
-    """Calcula cuántos episodios se pueden procesar de forma 100% segura esta noche."""
+    """Calcula cuántos episodios se pueden procesar de forma 100% segura esta noche considerando las claves disponibles."""
     last_reset = get_last_reset_datetime()
     last_reset_str = last_reset.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -91,11 +91,22 @@ def calculate_budget(history):
             if not rec.get("context_only", False):
                 used_today += 1
 
-    remaining_quota = max(0, DAILY_QUOTA_LIMIT - used_today)
-    usable_quota = max(0, remaining_quota - SAFETY_BUFFER)
-    budget = min(MAX_NIGHTLY_BATCH, usable_quota)
+    num_keys = 1
+    try:
+        from autosub.config import get_gemini_api_keys
+        num_keys = max(1, len(get_gemini_api_keys()))
+    except Exception:
+        pass
 
-    return budget, used_today, remaining_quota
+    daily_quota_limit = DAILY_QUOTA_LIMIT * num_keys
+    safety_buffer = SAFETY_BUFFER * num_keys
+    max_nightly_batch = MAX_NIGHTLY_BATCH * num_keys
+
+    remaining_quota = max(0, daily_quota_limit - used_today)
+    usable_quota = max(0, remaining_quota - safety_buffer)
+    budget = min(max_nightly_batch, usable_quota)
+
+    return budget, used_today, remaining_quota, daily_quota_limit
 
 def evaluate_existing_subtitle_qa(ass_path, profile_data=None):
     """Evalúa un subtítulo existente de forma 100% local (0 tokens) para obtener su nota QA."""
@@ -122,13 +133,112 @@ def evaluate_existing_subtitle_qa(ass_path, profile_data=None):
     except Exception as e:
         return None
 
-def find_candidates(history, whitelist=None, limit=10):
-    """Encuentra y prioriza los episodios que más se beneficiarían de una remasterización, filtrados por la lista blanca."""
+def find_candidates(history, whitelist=None, app_config=None, limit=10):
+    """Encuentra y prioriza episodios para las series habilitadas en la lista blanca:
+    1. Nuevos episodios sin subtítulo en español en disco (Prioridad 100).
+    2. Episodios existentes pendientes de remasterización con QA bajo o legacy (Prioridad 30 a 99).
+    """
     seen_paths = set()
     scored_candidates = []
     history_updated = False
 
-    # Barremos el historial desde el más reciente al más antiguo para evaluar el último estado procesado
+    # 1. Búsqueda directa en disco de las series activas en whitelist
+    if whitelist:
+        watch_dirs = []
+        try:
+            from autosub.core.watcher import get_parsed_watch_paths
+            watch_dirs = [p for p, _ in get_parsed_watch_paths()]
+        except Exception:
+            pass
+
+        if not watch_dirs:
+            watch_dirs = ["/data/tvshows", "/data/movies", "/data/doramas"]
+
+        for series_name in whitelist:
+            target_dir = None
+            for w_dir in watch_dirs:
+                cand = os.path.join(w_dir, series_name)
+                if os.path.isdir(cand):
+                    target_dir = cand
+                    break
+                # Intento case-insensitive
+                if os.path.exists(w_dir):
+                    for entry in os.listdir(w_dir):
+                        if entry.lower() == series_name.lower():
+                            full_cand = os.path.join(w_dir, entry)
+                            if os.path.isdir(full_cand):
+                                target_dir = full_cand
+                                break
+                if target_dir:
+                    break
+
+            if not target_dir or not os.path.isdir(target_dir):
+                continue
+
+            for root, _, files in os.walk(target_dir):
+                for f in sorted(files):
+                    if f.lower().endswith((".mkv", ".mp4")):
+                        full_p = os.path.join(root, f)
+                        if full_p in seen_paths:
+                            continue
+                        seen_paths.add(full_p)
+
+                        base_no_ext, _ = os.path.splitext(full_p)
+                        has_sub = any(os.path.exists(f"{base_no_ext}{ext}") for ext in [".es-419.ass", ".es.ass", ".es-419.srt", ".es.srt"])
+                        ass_path = f"{base_no_ext}.es-419.ass"
+
+                        if not has_sub:
+                            # NUEVO EPISODIO: Prioridad máxima para traducir
+                            scored_candidates.append({
+                                "path": full_p,
+                                "title": series_name,
+                                "file_name": f,
+                                "priority": 100,
+                                "qa_score": None,
+                                "reason": "Nuevo episodio sin subtítulo en español"
+                            })
+                        else:
+                            # Ya tiene subtítulo: evaluar si requiere remasterización
+                            qa_score = None
+                            for rec in history:
+                                if rec.get("path") == full_p:
+                                    qa_score = rec.get("qa_score")
+                                    break
+
+                            if qa_score is None and os.path.isfile(ass_path):
+                                pre_report = evaluate_existing_subtitle_qa(ass_path)
+                                if pre_report:
+                                    qa_score = pre_report.get("overall_score")
+
+                            if qa_score is not None and qa_score >= 90.0:
+                                continue
+
+                            has_speakers = has_real_speakers(ass_path)
+                            priority = 0
+                            reason = ""
+                            if qa_score is not None and qa_score < 80:
+                                priority = 100 - qa_score
+                                reason = f"Nota QA baja ({qa_score}/100)"
+                            elif qa_score is not None and qa_score < 90:
+                                priority = 50 + (90 - qa_score)
+                                reason = f"Nota Aceptable ({qa_score}/100)"
+                            elif not has_speakers:
+                                priority = 60
+                                reason = "Legacy: sin nota QA ni personajes identificados"
+                            else:
+                                priority = 30
+                                reason = "Legacy: sin auditoría formal QA"
+
+                            scored_candidates.append({
+                                "path": full_p,
+                                "title": series_name,
+                                "file_name": f,
+                                "priority": priority,
+                                "qa_score": qa_score,
+                                "reason": reason
+                            })
+
+    # 2. Barremos el historial para cualquier otro archivo no visto en disco
     for rec in history:
         path = rec.get("path", "")
         if not path or path in seen_paths:
@@ -245,26 +355,25 @@ def main():
     with open(HISTORY_FILE, "r", encoding="utf-8") as f:
         history = json.load(f)
 
-    budget, used_today, remaining_quota = calculate_budget(history)
+    budget, used_today, remaining_quota, daily_quota_limit = calculate_budget(history)
     print(f"[Curator] Estado de Cuota de Hoy (desde 05:00 AM):", flush=True)
-    print(f"  - Episodios procesados hoy: {used_today} / {DAILY_QUOTA_LIMIT}", flush=True)
+    print(f"  - Episodios procesados hoy: {used_today} / {daily_quota_limit}", flush=True)
     print(f"  - Cuota restante a consumir: {remaining_quota} llamadas", flush=True)
-    print(f"  - Margen de seguridad reservado: {SAFETY_BUFFER} llamadas", flush=True)
     print(f"  - Presupuesto autorizado esta noche: {budget} episodios", flush=True)
 
     if budget <= 0 and not force_run:
-        msg = f"🌙 <b>AutoSub Curador Nocturno</b>\nSe alcanzó el límite de seguridad diario ({used_today}/{DAILY_QUOTA_LIMIT} procesados hoy). Esta noche no se encolarán remasterizaciones para proteger la cuota."
+        msg = f"🌙 <b>AutoSub Curador Nocturno</b>\nSe alcanzó el límite de seguridad diario ({used_today}/{daily_quota_limit} procesados hoy). Esta noche no se encolarán tareas para proteger la cuota."
         print(f"[Curator] {msg}", flush=True)
         if not dry_run and now.hour == 3:
             send_telegram(msg)
         return
 
-    candidates = find_candidates(history, whitelist=whitelist, limit=budget)
+    candidates = find_candidates(history, whitelist=whitelist, app_config=app_config, limit=budget)
     if not candidates:
-        print(f"[Curator] No se encontraron episodios pendientes de remasterizar para las series activas: {whitelist}.", flush=True)
+        print(f"[Curator] No se encontraron episodios pendientes de traducir ni remasterizar para las series activas: {whitelist}.", flush=True)
         return
 
-    print(f"[Curator] Candidatos seleccionados para remasterizar ({len(candidates)}):", flush=True)
+    print(f"[Curator] Candidatos seleccionados para procesar ({len(candidates)}):", flush=True)
     for idx, c in enumerate(candidates, 1):
         print(f"  [{idx}] {c['title']} - {c['file_name']}", flush=True)
         print(f"       Motivo: {c['reason']} (Prioridad {c['priority']})", flush=True)
