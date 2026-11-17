@@ -122,6 +122,10 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
                         print(f"[Gemini RateLimit] ⚠️ 429 en {model_name}. Pausando {wait_sec}s antes de reintentar...", flush=True)
                         time.sleep(wait_sec)
                         continue
+                elif err.code == 503:
+                    set_model_cooldown(model_name, 120)
+                    print(f"[Gemini 503] ⚠️ {model_name} con alta demanda temporal en Google (HTTP 503). Saltando inmediatamente a modelo de respaldo...", flush=True)
+                    break
                 print(f"[Gemini Error] ⚠️ {model_name} HTTP {err.code}: {body[:250]}", flush=True)
                 time.sleep(2)
             except Exception as ex:

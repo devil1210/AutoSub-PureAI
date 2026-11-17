@@ -56,3 +56,53 @@ def save_srt_output(out_srt_path, cues, final_texts):
             text = final_texts[idx] if idx < len(final_texts) else "\\N".join(c.get("lines", []))
             text = format_srt_text(text)
             f.write(f"{idx + 1}\n{c['time']}\n{text}\n\n")
+
+def save_cues_as_ass_and_srt(out_ass_path, out_srt_path, cues, final_texts, speakers=None):
+    """Guarda subtítulos a partir de cues SRT generando tanto el archivo SRT como el archivo ASS estilizado."""
+    save_srt_output(out_srt_path, cues, final_texts)
+
+    header = """[Script Info]
+Title: AutoSub Pure AI Subtitle
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: TV.709
+PlayResX: 1920
+PlayResY: 1080
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,50,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2.5,1.5,2,40,40,35,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    ass_lines = [header]
+
+    def _srt_time_to_ass(t_str):
+        p = t_str.strip().replace(",", ".")
+        parts = p.split(":")
+        if len(parts) == 3:
+            h = int(parts[0])
+            m = parts[1]
+            s_parts = parts[2].split(".")
+            s = s_parts[0]
+            ms = s_parts[1][:2] if len(s_parts) > 1 else "00"
+            return f"{h}:{m}:{s}.{ms}"
+        return p
+
+    for idx, c in enumerate(cues):
+        t_span = c.get("time", "")
+        if "-->" not in t_span:
+            continue
+        p = t_span.split("-->")
+        start_ass = _srt_time_to_ass(p[0])
+        end_ass = _srt_time_to_ass(p[1])
+        spk = str(speakers[idx]).strip() if (speakers and idx < len(speakers) and speakers[idx]) else ""
+        raw_text = final_texts[idx] if idx < len(final_texts) else "\\N".join(c.get("lines", []))
+        clean_text = sanitize_subtitle_text(raw_text.replace("\n", "\\N").replace("\r", ""))
+        ass_lines.append(f"Dialogue: 0,{start_ass},{end_ass},Default,{spk},0,0,0,,{clean_text}\n")
+
+    with open(out_ass_path, "w", encoding="utf-8") as f:
+        f.writelines(ass_lines)
+

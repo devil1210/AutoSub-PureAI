@@ -1,3 +1,4 @@
+import os
 import shutil
 from autosub.config import LANG_ALIASES
 
@@ -77,3 +78,56 @@ def select_source_track(sub_tracks, source_priority):
             return t
 
     return sub_tracks[0] if sub_tracks else None
+
+def find_external_source_subtitle(video_path, target_langs=None):
+    """
+    Busca un subtítulo externo en disco (.srt / .ass / .ssa) en la carpeta del vídeo
+    que sirva como pista de origen para la traducción.
+    Ignora subtítulos que ya correspondan al idioma de destino (ej: .es-419.srt, .es.ass, etc.)
+    """
+    if not video_path or not os.path.isfile(video_path):
+        return None
+
+    base_dir = os.path.dirname(video_path)
+    base_name = os.path.splitext(os.path.basename(video_path))[0]
+
+    ignored_suffixes = [".es-419.ass", ".es-419.srt", ".es.ass", ".es.srt", ".spa.srt", ".spa.ass"]
+    if target_langs:
+        for tl in target_langs:
+            tl_clean = str(tl).lower().strip()
+            ignored_suffixes.extend([f".{tl_clean}.ass", f".{tl_clean}.srt"])
+
+    # 1. Coincidencia exacta con el nombre del vídeo: base_name.srt o base_name.ass
+    for ext in [".srt", ".ass", ".ssa"]:
+        cand = os.path.join(base_dir, f"{base_name}{ext}")
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            return cand
+
+    # 2. Etiquetas de idiomas comunes de origen (ej: base_name.en.srt, base_name.eng.srt, base_name.ja.srt)
+    lang_tags = [
+        ".en.srt", ".eng.srt", ".en.ass", ".eng.ass",
+        ".ja.srt", ".jpn.srt", ".ja.ass", ".jpn.ass",
+        ".default.srt", ".default.ass"
+    ]
+    for tag in lang_tags:
+        cand = os.path.join(base_dir, f"{base_name}{tag}")
+        if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            return cand
+
+    # 3. Buscar cualquier archivo .srt / .ass en la carpeta del vídeo que comience con base_name y no sea target
+    try:
+        dir_files = sorted(os.listdir(base_dir))
+        for fn in dir_files:
+            fn_lower = fn.lower()
+            if fn_lower.endswith((".srt", ".ass", ".ssa")):
+                if any(fn_lower.endswith(ign) for ign in ignored_suffixes):
+                    continue
+                cand = os.path.join(base_dir, fn)
+                if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                    if fn.startswith(base_name) or len(dir_files) <= 10:
+                        return cand
+    except Exception:
+        pass
+
+    return None
+

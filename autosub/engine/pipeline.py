@@ -35,9 +35,9 @@ from autosub.engine.goldfish import (
 )
 from autosub.engine.qa import run_full_subtitle_qa
 from autosub.providers.ollama import is_ollama_alive
-from autosub.subtitles.mkv import find_matching_target_track, select_source_track
+from autosub.subtitles.mkv import find_matching_target_track, select_source_track, find_external_source_subtitle
 from autosub.subtitles.parser import is_translatable_ass_line
-from autosub.subtitles.serializer import save_ass_and_srt_outputs, save_srt_output
+from autosub.subtitles.serializer import save_ass_and_srt_outputs, save_srt_output, save_cues_as_ass_and_srt
 
 def process_file(video_path, force=False, context_only=False, target_languages=None):
     import autosub.core.context as ctx
@@ -233,7 +233,32 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
     tracks = info.get("tracks", [])
     sub_tracks = [t for t in tracks if t.get("type") == "subtitles"]
-    if not sub_tracks:
+    external_source = find_external_source_subtitle(video_path, target_langs)
+
+    if not sub_tracks and not external_source:
+        err_msg = f"No se encontraron pistas de subtítulos internas ni archivo externo (.srt / .ass) para {series_name}."
+        print(f"[AutoSub] ⚠️ {err_msg}", flush=True)
+        with processing_lock:
+            ctx.current_stage = "Error: Sin subtítulos"
+            ctx.current_stage_badge = "Sin Sub"
+            ctx.current_stage_detail = err_msg
+        rec = {
+            "id": int(time.time() * 1000),
+            "file_name": os.path.basename(video_path),
+            "path": video_path,
+            "title": series_name,
+            "completed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "duration_sec": 0.0,
+            "duration_formatted": "0s",
+            "lines_count": 0,
+            "format": "Ninguno",
+            "target_languages": target_langs,
+            "model": "-",
+            "proofread": False,
+            "status": "Error: Sin subtítulos",
+            "error": err_msg
+        }
+        append_history_record(rec)
         return False
 
     profile_data, profile_path = get_or_create_series_profile(series_name)
@@ -431,75 +456,134 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     print(f"[AutoSub] ⚠️ Fallo al auditar pista preexistente ({e_aud}), recurriendo a traducción tradicional...", flush=True)
 
             if source_data is None:
-                selected_track = select_source_track(sub_tracks, source_priority)
-                if not selected_track:
-                    continue
-                track_id = selected_track["id"]
-                codec = selected_track.get("codec", "")
-                src_is_ass = "substation" in codec.lower() or "ass" in codec.lower() or "ssa" in codec.lower()
-                temp_ext = ".ass" if src_is_ass else ".srt"
-                temp_file = os.path.join(tempfile.gettempdir(), f"autosub_raw_{int(time.time()*1000)}_{base_name}{temp_ext}")
-                created_temp_files.append(temp_file)
-                with processing_lock:
-                    ctx.current_stage = f"Extrayendo pista de subtítulos ({codec})..."
-                    ctx.current_stage_badge = "Extracción"
-                    ctx.current_stage_percent = 10
-                    ctx.current_stage_detail = f"Pista ID {track_id} ({temp_ext})"
-                subprocess.run(["mkvextract", "tracks", video_path, f"{track_id}:{temp_file}"], check=True, capture_output=True)
-                if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
-                    continue
-
-                if src_is_ass:
-                    with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
-                        lines = f.readlines()
-                    dialogue_indices = []
-                    raw_texts = []
-                    durations = []
-                    for idx, line in enumerate(lines):
-                        if line.startswith("Dialogue:"):
-                            parts = line.split(",", 9)
-                            if len(parts) == 10:
-                                style_name = parts[3].strip()
-                                eff = parts[8].strip()
-                                txt = parts[9].rstrip("\r\n")
-                                if is_translatable_ass_line(style_name, txt, eff):
-                                    dialogue_indices.append(idx)
-                                    raw_texts.append(txt)
-                                    dur = ass_timestamp_to_seconds(parts[2]) - ass_timestamp_to_seconds(parts[1])
+                selected_track = select_source_track(sub_tracks, source_priority) if sub_tracks else None
+                if selected_track:
+                    track_id = selected_track["id"]
+                    codec = selected_track.get("codec", "")
+                    src_is_ass = "substation" in codec.lower() or "ass" in codec.lower() or "ssa" in codec.lower()
+                    temp_ext = ".ass" if src_is_ass else ".srt"
+                    temp_file = os.path.join(tempfile.gettempdir(), f"autosub_raw_{int(time.time()*1000)}_{base_name}{temp_ext}")
+                    created_temp_files.append(temp_file)
+                    with processing_lock:
+                        ctx.current_stage = f"Extrayendo pista de subtítulos ({codec})..."
+                        ctx.current_stage_badge = "Extracción"
+                        ctx.current_stage_percent = 10
+                        ctx.current_stage_detail = f"Pista ID {track_id} ({temp_ext})"
+                    subprocess.run(["mkvextract", "tracks", video_path, f"{track_id}:{temp_file}"], check=True, capture_output=True)
+                    if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+                        if src_is_ass:
+                            with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
+                                lines = f.readlines()
+                            dialogue_indices = []
+                            raw_texts = []
+                            durations = []
+                            for idx, line in enumerate(lines):
+                                if line.startswith("Dialogue:"):
+                                    parts = line.split(",", 9)
+                                    if len(parts) == 10:
+                                        style_name = parts[3].strip()
+                                        eff = parts[8].strip()
+                                        txt = parts[9].rstrip("\r\n")
+                                        if is_translatable_ass_line(style_name, txt, eff):
+                                            dialogue_indices.append(idx)
+                                            raw_texts.append(txt)
+                                            dur = ass_timestamp_to_seconds(parts[2]) - ass_timestamp_to_seconds(parts[1])
+                                            durations.append(max(0.0, dur))
+                            source_data = {
+                                "is_ass": True,
+                                "lines": lines,
+                                "indices": dialogue_indices,
+                                "texts": raw_texts,
+                                "durations": durations,
+                                "track": selected_track
+                            }
+                        else:
+                            with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read()
+                            blocks = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
+                            cues = []
+                            durations = []
+                            for b in blocks:
+                                lines = b.split("\n")
+                                if len(lines) >= 3 and "-->" in lines[1]:
+                                    cues.append({
+                                        "id": lines[0],
+                                        "time": lines[1],
+                                        "lines": lines[2:]
+                                    })
+                                    p = lines[1].split("-->")
+                                    dur = srt_timestamp_to_seconds(p[1]) - srt_timestamp_to_seconds(p[0])
                                     durations.append(max(0.0, dur))
-                    source_data = {
-                        "is_ass": True,
-                        "lines": lines,
-                        "indices": dialogue_indices,
-                        "texts": raw_texts,
-                        "durations": durations,
-                        "track": selected_track
-                    }
-                else:
-                    with open(temp_file, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
-                    blocks = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
-                    cues = []
-                    durations = []
-                    for b in blocks:
-                        lines = b.split("\n")
-                        if len(lines) >= 3 and "-->" in lines[1]:
-                            cues.append({
-                                "id": lines[0],
-                                "time": lines[1],
-                                "lines": lines[2:]
-                            })
-                            p = lines[1].split("-->")
-                            dur = srt_timestamp_to_seconds(p[1]) - srt_timestamp_to_seconds(p[0])
-                            durations.append(max(0.0, dur))
-                    all_texts = ["\\N".join(c["lines"]) for c in cues]
-                    source_data = {
-                        "is_ass": False,
-                        "cues": cues,
-                        "texts": all_texts,
-                        "durations": durations,
-                        "track": selected_track
-                    }
+                            all_texts = ["\\N".join(c["lines"]) for c in cues]
+                            source_data = {
+                                "is_ass": False,
+                                "cues": cues,
+                                "texts": all_texts,
+                                "durations": durations,
+                                "track": selected_track
+                            }
+
+                # Fallback: si no hubo pistas internas o falló la extracción, usar subtítulo externo
+                if source_data is None and external_source:
+                    ext_name = os.path.basename(external_source)
+                    print(f"[AutoSub] 📂 Cargando subtítulo externo como fuente: '{ext_name}'...", flush=True)
+                    with processing_lock:
+                        ctx.current_stage = f"Cargando subtítulo externo ({ext_name})..."
+                        ctx.current_stage_badge = "Extracción"
+                        ctx.current_stage_percent = 10
+                        ctx.current_stage_detail = f"Fuente: {ext_name}"
+                    src_is_ass = external_source.lower().endswith((".ass", ".ssa"))
+                    if src_is_ass:
+                        with open(external_source, "r", encoding="utf-8", errors="ignore") as f:
+                            lines = f.readlines()
+                        dialogue_indices = []
+                        raw_texts = []
+                        durations = []
+                        for idx, line in enumerate(lines):
+                            if line.startswith("Dialogue:"):
+                                parts = line.split(",", 9)
+                                if len(parts) == 10:
+                                    style_name = parts[3].strip()
+                                    eff = parts[8].strip()
+                                    txt = parts[9].rstrip("\r\n")
+                                    if is_translatable_ass_line(style_name, txt, eff):
+                                        dialogue_indices.append(idx)
+                                        raw_texts.append(txt)
+                                        dur = ass_timestamp_to_seconds(parts[2]) - ass_timestamp_to_seconds(parts[1])
+                                        durations.append(max(0.0, dur))
+                        source_data = {
+                            "is_ass": True,
+                            "lines": lines,
+                            "indices": dialogue_indices,
+                            "texts": raw_texts,
+                            "durations": durations,
+                            "track": {"id": "external", "codec": "SubStationAlpha", "properties": {"language": "und"}}
+                        }
+                    else:
+                        with open(external_source, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                        blocks = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
+                        cues = []
+                        durations = []
+                        for b in blocks:
+                            lines = b.split("\n")
+                            if len(lines) >= 3 and "-->" in lines[1]:
+                                cues.append({
+                                    "id": lines[0],
+                                    "time": lines[1],
+                                    "lines": lines[2:]
+                                })
+                                p = lines[1].split("-->")
+                                dur = srt_timestamp_to_seconds(p[1]) - srt_timestamp_to_seconds(p[0])
+                                durations.append(max(0.0, dur))
+                        all_texts = ["\\N".join(c["lines"]) for c in cues]
+                        source_data = {
+                            "is_ass": False,
+                            "cues": cues,
+                            "texts": all_texts,
+                            "durations": durations,
+                            "track": {"id": "external", "codec": "SubRip/SRT", "properties": {"language": "und"}}
+                        }
 
             if not source_data or not source_data["texts"]:
                 continue
@@ -602,7 +686,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
             if source_data["is_ass"]:
                 save_ass_and_srt_outputs(out_ass, out_srt, source_data["lines"], source_data["indices"], translated_texts, speakers=speakers)
             else:
-                save_srt_output(out_srt, source_data["cues"], translated_texts)
+                save_cues_as_ass_and_srt(out_ass, out_srt, source_data["cues"], translated_texts, speakers=speakers)
 
             # Control de Calidad (QA Inspector)
             with processing_lock:
