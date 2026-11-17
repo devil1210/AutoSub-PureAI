@@ -142,8 +142,9 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 parts = line.split(",", 9)
                                 if len(parts) == 10:
                                     s_name = parts[3].strip()
+                                    eff = parts[8].strip()
                                     t_str = parts[9].rstrip("\r\n")
-                                    if is_translatable_ass_line(s_name, t_str):
+                                    if is_translatable_ass_line(s_name, t_str, eff):
                                         dialogues.append(t_str)
                 except Exception as e:
                     print(f"[AutoSub] Error leyendo {existing_sub}: {e}", flush=True)
@@ -178,7 +179,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                     for l_tmp in f_tmp:
                                         if l_tmp.startswith("Dialogue:"):
                                             p_tmp = l_tmp.split(",", 9)
-                                            if len(p_tmp) == 10 and is_translatable_ass_line(p_tmp[3].strip(), p_tmp[9].rstrip("\r\n")):
+                                            if len(p_tmp) == 10 and is_translatable_ass_line(p_tmp[3].strip(), p_tmp[9].rstrip("\r\n"), p_tmp[8].strip()):
                                                 raw_dialogues.append(p_tmp[9].rstrip("\r\n"))
                             else:
                                 with open(t_tmp, "r", encoding="utf-8", errors="ignore") as f_tmp:
@@ -272,8 +273,9 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                             parts = line.split(",", 9)
                             if len(parts) == 10:
                                 s_name = parts[3].strip()
+                                eff = parts[8].strip()
                                 t_val = parts[9].rstrip("\r\n")
-                                if is_translatable_ass_line(s_name, t_val):
+                                if is_translatable_ass_line(s_name, t_val, eff):
                                     d_indices.append(idx)
                                     d_texts.append(t_val)
                     if d_texts:
@@ -308,8 +310,9 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                     parts = line.split(",", 9)
                                     if len(parts) == 10:
                                         s_name = parts[3].strip()
+                                        eff = parts[8].strip()
                                         t_val = parts[9].rstrip("\r\n")
-                                        if is_translatable_ass_line(s_name, t_val):
+                                        if is_translatable_ass_line(s_name, t_val, eff):
                                             d_indices.append(idx)
                                             d_texts.append(t_val)
 
@@ -457,8 +460,9 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                             parts = line.split(",", 9)
                             if len(parts) == 10:
                                 style_name = parts[3].strip()
+                                eff = parts[8].strip()
                                 txt = parts[9].rstrip("\r\n")
-                                if is_translatable_ass_line(style_name, txt):
+                                if is_translatable_ass_line(style_name, txt, eff):
                                     dialogue_indices.append(idx)
                                     raw_texts.append(txt)
                                     dur = ass_timestamp_to_seconds(parts[2]) - ass_timestamp_to_seconds(parts[1])

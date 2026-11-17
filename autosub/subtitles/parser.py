@@ -1,12 +1,32 @@
 import re
 
-def is_translatable_ass_line(style_name, raw_text):
-    if re.search(r"\{\\p[1-9]", raw_text):
+def is_translatable_ass_line(style_name, raw_text, effect=""):
+    # 1. Ignorar estilos de karaoke/romaji/efectos de partículas/créditos de edición
+    s_lower = (style_name or "").lower()
+    if any(k in s_lower for k in ("romaji", "karaoke", "kara", "effector", "fx", "edits", "édits")):
         return False
-    clean = re.sub(r"\{.*?\}", "", raw_text).replace("\\N", " ").replace("\\n", " ").strip()
+    if effect and any(k in str(effect).lower() for k in ("karaoke", "fx", "effector")):
+        return False
+
+    # 2. Ignorar dibujos vectoriales ASS (\p1, \p2, etc. en cualquier lugar dentro de las etiquetas ASS)
+    if re.search(r"\\p[1-9]", raw_text):
+        return False
+
+    # 3. Limpiar tags ASS {...}
+    clean = re.sub(r"\{[^}]*\}", "", raw_text).replace("\\N", " ").replace("\\n", " ").strip()
     if not clean:
         return False
-    return bool(re.search(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]", clean))
+
+    # 4. Ignorar comandos de dibujo vectorial de Aegisub (m 0 0 l 150...)
+    if re.match(r"^[mblspc]\s+[-0-9\s]+", clean):
+        return False
+
+    # 5. Debe contener al menos 2 letras legibles (alfabéticas)
+    letters = re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑüÜàâçéèêëîïôûùÿœæ]", clean)
+    if len(letters) < 2:
+        return False
+
+    return True
 
 def mask_ass_tags(text: str) -> tuple[str, dict[str, str]]:
     """Enmascara etiquetas ASS entre llaves en tokens neutros <T0>, <T1> para protegerlas del LLM."""
@@ -42,8 +62,9 @@ def parse_ass_dialogues(lines: list[str]) -> tuple[list[int], list[str]]:
             parts = line.split(",", 9)
             if len(parts) == 10:
                 s_name = parts[3].strip()
+                eff = parts[8].strip()
                 t_val = parts[9].rstrip("\r\n")
-                if is_translatable_ass_line(s_name, t_val):
+                if is_translatable_ass_line(s_name, t_val, eff):
                     d_indices.append(idx)
                     d_texts.append(t_val)
     return d_indices, d_texts
