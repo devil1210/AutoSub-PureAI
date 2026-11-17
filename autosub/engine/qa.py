@@ -33,6 +33,15 @@ CALQUE_TERMS = {
     r"\b[Mm]f(?:\.{2,3})?\b": "Mf... (interjección o calco no natural en español, usar Este... o Mmm...)",
 }
 
+QA_ENGLISH_STOPWORDS = {
+    "the", "and", "to", "of", "a", "in", "that", "have", "i", "it", "for",
+    "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his",
+    "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my",
+    "one", "all", "would", "there", "their", "what", "so", "up", "out", "if",
+    "about", "who", "get", "which", "go", "me", "daughter", "debt", "started",
+    "already", "violence", "raw", "thirst", "killing", "sword"
+}
+
 def audit_technical_quality(translated_texts: List[str], durations: List[float] = None) -> Dict[str, Any]:
     """
     Evalúa la calidad técnica y de lecturabilidad del subtítulo (0 a 100 puntos):
@@ -113,17 +122,20 @@ def audit_linguistic_heuristics(translated_texts: List[str], profile_data: Dict[
     Evalúa heurísticas lingüísticas en Python (0 ms):
     - Detección de modismos peninsulares no neutros.
     - Detección de calcos gramaticales del inglés.
-    - Consistencia básica con términos clave del glosario.
+    - Detección de fuga de texto en inglés sin traducir.
+    - Detección de líneas truncadas mid-sentence.
     """
     total = len(translated_texts)
     if total == 0:
-        return {"score": 0, "peninsular_matches": [], "calque_matches": []}
+        return {"score": 0, "peninsular_matches": [], "calque_matches": [], "english_leakage": [], "truncated_lines": []}
 
     peninsular_found = []
     calques_found = []
+    english_leakage = []
+    truncated_lines = []
 
     for idx, text in enumerate(translated_texts):
-        clean = re.sub(r"\{.*?\}|<T\d+>", "", text).strip()
+        clean = re.sub(r"\{.*?\}|<T\d+>", "", text).replace("\\N", " ").replace("\\n", " ").strip()
         # Modismos de España
         for pat, desc in PENINSULAR_TERMS.items():
             m = re.search(pat, clean, flags=re.IGNORECASE)
@@ -136,11 +148,27 @@ def audit_linguistic_heuristics(translated_texts: List[str], profile_data: Dict[
             if m:
                 calques_found.append({"line": idx + 1, "term": m.group(0), "desc": desc, "text": clean[:60]})
 
+        # Detección de fuga de inglés (stopwords)
+        words = re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]+", clean.lower())
+        if words and len(words) >= 3:
+            eng_hits = sum(1 for w in words if w in QA_ENGLISH_STOPWORDS)
+            if eng_hits / len(words) >= 0.35:
+                english_leakage.append({"line": idx + 1, "text": clean[:60], "ratio": round(eng_hits / len(words), 2)})
+
+        # Detección de líneas truncadas
+        if re.search(r"\b(en|de|la|el|un|una|con|para|por|a|que|y|o)\s*$", clean, re.IGNORECASE):
+            truncated_lines.append({"line": idx + 1, "text": clean[:60]})
+
     score = 100.0
     if peninsular_found:
-        score -= min(40.0, len(peninsular_found) * 5.0)
+        score -= min(35.0, len(peninsular_found) * 5.0)
     if calques_found:
         score -= min(25.0, len(calques_found) * 4.0)
+    if english_leakage:
+        # Fuga crítica de inglés: penalización severa
+        score -= min(70.0, len(english_leakage) * 20.0)
+    if truncated_lines:
+        score -= min(40.0, len(truncated_lines) * 15.0)
 
     score = max(0.0, min(100.0, round(score, 1)))
 
@@ -149,7 +177,11 @@ def audit_linguistic_heuristics(translated_texts: List[str], profile_data: Dict[
         "peninsular_count": len(peninsular_found),
         "peninsular_samples": peninsular_found[:5],
         "calques_count": len(calques_found),
-        "calques_samples": calques_found[:5]
+        "calques_samples": calques_found[:5],
+        "english_leakage_count": len(english_leakage),
+        "english_leakage_samples": english_leakage[:5],
+        "truncated_lines_count": len(truncated_lines),
+        "truncated_lines_samples": truncated_lines[:5]
     }
 
 def audit_translation_semantic_sample(
@@ -297,6 +329,14 @@ def run_full_subtitle_qa(
     # Ponderación integral: 35% Técnica, 25% Dialectal, 40% Semántica
     overall_score = round((tech["score"] * 0.35) + (ling["score"] * 0.25) + (sem["score"] * 0.40), 1)
 
+    # Salvaguarda estricta: Si hay fuga de texto en inglés o líneas truncadas, nunca aprobar
+    eng_count = ling.get("english_leakage_count", 0)
+    trunc_count = ling.get("truncated_lines_count", 0)
+    if eng_count > 0:
+        overall_score = min(overall_score, 45.0)
+    elif trunc_count > 0:
+        overall_score = min(overall_score, 55.0)
+
     if overall_score >= 95.0:
         grade = "EXCELENTE"
         badge = "🟢 Excelente"
@@ -315,7 +355,12 @@ def run_full_subtitle_qa(
         icon = "⚠️"
     else:
         grade = "REVISAR"
-        badge = "🔴 Revisar"
+        if eng_count > 0:
+            badge = f"🔴 Revisar ({eng_count} en inglés)"
+        elif trunc_count > 0:
+            badge = f"🔴 Revisar ({trunc_count} truncadas)"
+        else:
+            badge = "🔴 Revisar"
         icon = "❌"
 
     summary_line = (

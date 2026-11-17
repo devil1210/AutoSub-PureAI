@@ -97,7 +97,15 @@ def smart_boundary_slicing(items: list, min_chunk: int = 20, max_chunk: int = 35
 
     return slices
 
-def tier1_validate_batch(raw_texts: list[str], translated_texts: list[str], tag_maps: list[dict[str, str]] = None, durations: list[float] = None) -> list[dict]:
+ENGLISH_STOPWORDS = {
+    "the", "and", "to", "of", "a", "in", "that", "have", "i", "it", "for",
+    "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his",
+    "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my",
+    "one", "all", "would", "there", "their", "what", "so", "up", "out", "if",
+    "about", "who", "get", "which", "go", "me", "daughter"
+}
+
+def tier1_validate_batch(raw_texts: list[str], translated_texts: list[str], tag_maps: list[dict[str, str]] = None, durations: list[float] = None, target_lang: str = "es-419") -> list[dict]:
     """
     Tier 1: Validador Determinista Instantáneo en Python (0 ms, 0 tokens).
     Verifica:
@@ -105,6 +113,7 @@ def tier1_validate_batch(raw_texts: list[str], translated_texts: list[str], tag_
     2. Preservación intacta de tokens de etiqueta AST (<T0>, <T1>, ...).
     3. Balance estricto de llaves ({ y }).
     4. Cálculo de CPS (límite 20 CPS para >1.5s, 25 CPS para <=1.5s).
+    5. Detección de texto en inglés sin traducir o líneas truncadas.
     Retorna lista de defectos encontrados (vacía si es 100% válido).
     """
     defects = []
@@ -115,6 +124,9 @@ def tier1_validate_batch(raw_texts: list[str], translated_texts: list[str], tag_
             "detail": f"Conteo de líneas no coincide: esperadas {len(raw_texts)}, obtenidas {len(translated_texts)}"
         })
         return defects
+
+    is_target_non_en = not target_lang.lower().startswith("en")
+    is_spanish = target_lang.lower() in ["es-419", "es", "spa", "spanish"]
 
     for idx, (raw, trans) in enumerate(zip(raw_texts, translated_texts)):
         # 1. Preservación de tokens de etiqueta AST <T#>
@@ -146,6 +158,42 @@ def tier1_validate_batch(raw_texts: list[str], translated_texts: list[str], tag_
                         "line": idx,
                         "type": "CPS_EXCEEDED",
                         "detail": f"CPS excesivo: {cps:.1f} > límite {limit:.1f} (duración {dur:.2f}s)"
+                    })
+
+        # 4. Detección de texto no traducido / fuga de inglés
+        clean_raw = re.sub(r"\{.*?\}|<T\d+>", "", raw).replace("\\N", " ").replace("\\n", " ").strip()
+        clean_trans = re.sub(r"\{.*?\}|<T\d+>", "", trans).replace("\\N", " ").replace("\\n", " ").strip()
+
+        if is_target_non_en and clean_raw and clean_trans:
+            # 4a. Traducción idéntica al original en inglés (> 4 letras)
+            if clean_trans.lower() == clean_raw.lower() and len(clean_raw) > 4:
+                # Permitir onomatopeyas o nombres cortos
+                if not re.match(r"^(?:ah+|oh+|eh+|hm+|shh+|wow|hey|nya)[!?.…\s]*$", clean_trans, re.IGNORECASE):
+                    defects.append({
+                        "line": idx,
+                        "type": "UNTRANSLATED_RAW",
+                        "detail": f"Línea idéntica al texto de origen en inglés: '{clean_trans}'"
+                    })
+
+            # 4b. Fuga de palabras funcionales en inglés (stopwords)
+            if is_spanish:
+                words = re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]+", clean_trans.lower())
+                if words and len(words) >= 3:
+                    eng_hits = sum(1 for w in words if w in ENGLISH_STOPWORDS)
+                    if eng_hits / len(words) >= 0.35:
+                        defects.append({
+                            "line": idx,
+                            "type": "UNTRANSLATED_ENGLISH",
+                            "detail": f"Línea contiene palabras en inglés sin traducir: '{clean_trans}'"
+                        })
+
+            # 4c. Detección de oraciones truncadas mid-batch (termina en preposición o conjunción abierta)
+            if re.search(r"\b(en|de|la|el|un|una|con|para|por|a|que|y|o)\s*$", clean_trans, re.IGNORECASE):
+                if not clean_raw.endswith(("...", "…", "-", "—")):
+                    defects.append({
+                        "line": idx,
+                        "type": "TRUNCATED_LINE",
+                        "detail": f"Línea aparentemente truncada a mitad de frase: '{clean_trans}'"
                     })
 
     return defects
@@ -188,15 +236,36 @@ def clean_split_dialogue_punctuation(texts: list[str]) -> list[str]:
                     cleaned[i] = re.sub(r"^(\s*(?:\{.*?\}|<T\d+>)*)\s*¡\s*", r"\1", curr_txt)
                     continue
 
-    # Sanitización determinística de calcos y erratas comunes
+    # Sanitización determinística de calcos, signos duplicados dentro de la línea y erratas comunes
     for i in range(len(cleaned)):
         t = cleaned[i]
+
+        # 1. Eliminar signo redundante después de salto de línea \N o \n dentro del mismo subtítulo
+        # Ej: ¡Así que, al parecer...\N¡estará en la Arena! => ¡Así que, al parecer...\Nestará en la Arena!
+        if t.startswith("¡") and "!" not in t.split(r"\N")[0].split(r"\n")[0]:
+            t = re.sub(r"(\\N|\\n)\s*¡", r"\1", t)
+        if t.startswith("¿") and "?" not in t.split(r"\N")[0].split(r"\n")[0]:
+            t = re.sub(r"(\\N|\\n)\s*¿", r"\1", t)
+
+        # 2. Reparar barras invertidas erróneas fuera de llaves ASS (ej: \Así que => \NAsí que)
+        parts = re.split(r"(\{.*?\})", t)
+        for j in range(0, len(parts), 2):
+            p = parts[j]
+            # Si \ está antes de mayúscula distinta de N o h (ej. \Así), era un \N mutilado
+            p = re.sub(r"\\(?![Nnh])([A-ZÁÉÍÓÚ][a-záéíóúñ])", r"\\N\1", p)
+            # Eliminar barras invertidas sueltas que no sean escapes ASS válidos (\N, \n, \h)
+            p = re.sub(r"\\(?!N|n|h)", "", p)
+            parts[j] = p
+        t = "".join(parts)
+
+        # 3. Reemplazos de calcos, modismos y erratas frecuentes
         t = re.sub(r"\b([Cc])resc([ií])\b", r"\1rec\2", t)
         t = re.sub(r"\b[Pp]equeña\s+[Ss]eñorita\b", "señorita", t)
         t = re.sub(r"\bInconsiderad([asoe]s?)\b", r"Desconsiderad\1", t)
         t = re.sub(r"\binconsiderad([asoe]s?)\b", r"desconsiderad\1", t)
         t = re.sub(r"\balgo\s+[hl]isonjeiro\s+así\b", r"algún halago así", t, flags=re.IGNORECASE)
         t = re.sub(r"\b[hl]isonjeir([ao]s?)\b", r"halagador\1", t, flags=re.IGNORECASE)
+        t = re.sub(r"\b[Mm]jum(?:\.{1,3})?\b", "Mm.", t)
         t = re.sub(r"^.*?=>\s*(?:\[\d+\]\s*)?", "", t)
         t = t.replace("«", '"').replace("»", '"')
         cleaned[i] = t
@@ -353,19 +422,66 @@ REGLAS CRÍTICAS:
                         val = re.sub(r"^\s*\([A-Za-z0-9_\-\s]+\)\s*:\s*", "", val)
                         parsed_results[idx] = val
 
-            if len(parsed_results) >= len(batch_texts) * 0.7:
-                translated_masked = [parsed_results.get(i, masked_batch[i]) for i in range(len(batch_texts))]
+            if len(parsed_results) == len(batch_texts):
+                translated_masked = [parsed_results[i] for i in range(len(batch_texts))]
                 break
+
+            # Rescate inteligente de líneas faltantes sin fallback a inglés
+            if len(parsed_results) >= len(batch_texts) * 0.5:
+                missing_indices = [i for i in range(len(batch_texts)) if i not in parsed_results]
+                print(f"[Goldfish] ⚠️ Faltan {len(missing_indices)} líneas en el lote. Solicitando rescate específico...", flush=True)
+                missing_lines = []
+                for m_i in missing_indices:
+                    spk = speakers[m_i] if speakers and m_i < len(speakers) and speakers[m_i] else ""
+                    if spk:
+                        missing_lines.append(f"[{m_i+1}] ({spk}): {masked_batch[m_i]}")
+                    else:
+                        missing_lines.append(f"[{m_i+1}] {masked_batch[m_i]}")
+
+                rescue_prompt = f"Faltan exactamente las siguientes {len(missing_indices)} líneas por traducir al {prompt_lang}. Devuélvelas únicamente con su numeración [N] y texto traducido:\n" + "\n".join(missing_lines) + "\n/no_think"
+                rescue_resp = call_ai(rescue_prompt, system_instruction=sys_prompt, timeout=90)
+                if rescue_resp:
+                    for rline in rescue_resp.strip().split("\n"):
+                        rm = re.match(r"^\[?(\d+)\]?[\.\:\)]?\s*(.*)$", rline.strip())
+                        if rm:
+                            ridx = int(rm.group(1)) - 1
+                            if ridx in missing_indices and rm.group(2).strip():
+                                rval = rm.group(2).strip()
+                                rval = re.sub(r"^.*?=>\s*(?:\[\d+\]\s*)?", "", rval).strip()
+                                if speakers and ridx < len(speakers) and speakers[ridx]:
+                                    spk_esc = re.escape(speakers[ridx])
+                                    rval = re.sub(r"^\s*\(?" + spk_esc + r"\)?\s*:\s*", "", rval, flags=re.IGNORECASE)
+                                rval = re.sub(r"^\s*\([A-Za-z0-9_\-\s]+\)\s*:\s*", "", rval)
+                                parsed_results[ridx] = rval
+
+                if len(parsed_results) == len(batch_texts):
+                    translated_masked = [parsed_results[i] for i in range(len(batch_texts))]
+                    break
 
         if attempt < 2:
             print(f"[Goldfish] ⚠️ Reintentando lote atómico ({attempt+1}/3)...", flush=True)
             time.sleep(3)
 
+    # Si tras 3 intentos aún faltan líneas, traducir individualmente las faltantes NUNCA dejando texto en inglés
+    if not translated_masked and parsed_results:
+        missing_indices = [i for i in range(len(batch_texts)) if i not in parsed_results]
+        print(f"[Goldfish] ⚠️ Rescate individual de {len(missing_indices)} línea(s) restante(s)...", flush=True)
+        for m_i in missing_indices:
+            single_p = f"Traduce al {prompt_lang} el siguiente subtítulo:\n{masked_batch[m_i]}\n/no_think"
+            s_resp = call_ai(single_p, timeout=45)
+            if s_resp and s_resp.strip():
+                clean_s = s_resp.strip().split("\n")[0]
+                clean_s = re.sub(r"^\[?\d+\]?[\.\:\)]?\s*", "", clean_s).strip()
+                clean_s = re.sub(r"^.*?=>\s*(?:\[\d+\]\s*)?", "", clean_s).strip()
+                parsed_results[m_i] = clean_s
+        if len(parsed_results) == len(batch_texts):
+            translated_masked = [parsed_results[i] for i in range(len(batch_texts))]
+
     if not translated_masked:
         return None
 
     # 3. Tier 1: Deterministic Quality Validation
-    defects = tier1_validate_batch(masked_batch, translated_masked, tag_maps=tag_maps, durations=durations)
+    defects = tier1_validate_batch(masked_batch, translated_masked, tag_maps=tag_maps, durations=durations, target_lang=target_lang)
 
     # 4. Tier 2: Conditional Proofreading
     if defects and proofread:
