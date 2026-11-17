@@ -67,7 +67,9 @@ DEFAULT_CONFIG = {
     "watch_paths": ["/data/tvshows", "/data/movies"],
     "source_priority": ["ja", "en", "fr", "de", "es", "it", "pt", "ru", "zh"],
     "target_languages": ["es-419"],
-    "curator_whitelist": ["Nia Liston - The Merciless Maiden"]
+    "curator_whitelist": ["Nia Liston - The Merciless Maiden"],
+    "sonarr_url": os.getenv("SONARR_URL", "http://192.168.1.131:8989"),
+    "sonarr_api_key": os.getenv("SONARR_API_KEY", "91528f758b7f42be9b10852ee230bf41")
 }
 
 SUPPORTED_TARGET_LANGUAGES = {

@@ -270,7 +270,7 @@ class AutoSubHandler(BaseHTTPRequestHandler):
                             if f.lower().endswith((".mkv", ".mp4")):
                                 f_full = os.path.join(root, f)
                                 base_no_ext, _ = os.path.splitext(f_full)
-                                has_sub = any(os.path.exists(f"{base_no_ext}{ext}") for ext in [".es.srt", ".es-419.srt", ".es.ass"])
+                                has_sub = any(os.path.exists(f"{base_no_ext}{ext}") for ext in [".es-419.ass", ".es.ass", ".es-419.srt", ".es.srt"])
                                 rel_path = os.path.relpath(f_full, target_path)
                                 try:
                                     sz_mb = round(os.path.getsize(f_full) / (1024 * 1024), 1)
@@ -283,6 +283,9 @@ class AutoSubHandler(BaseHTTPRequestHandler):
                                     "has_sub": has_sub,
                                     "size_mb": sz_mb
                                 })
+
+            from autosub.core.sonarr import extract_season_episode_fallback
+            files_list.sort(key=lambda x: (extract_season_episode_fallback(x["path"], series_name), x["name"]))
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")

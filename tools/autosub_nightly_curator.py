@@ -142,7 +142,7 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
     scored_candidates = []
     history_updated = False
 
-    # 1. Búsqueda directa en disco de las series activas en whitelist
+    # 1. Búsqueda canónica asistida por Sonarr y disco de las series activas en whitelist
     if whitelist:
         watch_dirs = []
         try:
@@ -153,6 +153,12 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
 
         if not watch_dirs:
             watch_dirs = ["/data/tvshows", "/data/movies", "/data/doramas"]
+
+        try:
+            from autosub.core.sonarr import get_series_episodes_from_sonarr, extract_season_episode_fallback
+        except Exception:
+            get_series_episodes_from_sonarr = None
+            extract_season_episode_fallback = None
 
         for series_name in whitelist:
             target_dir = None
@@ -172,71 +178,150 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
                 if target_dir:
                     break
 
-            if not target_dir or not os.path.isdir(target_dir):
-                continue
+            # A. Consultar orden canónico de episodios directamente desde Sonarr
+            series_episodes = None
+            if get_series_episodes_from_sonarr:
+                series_episodes = get_series_episodes_from_sonarr(series_name, series_dir=target_dir)
 
-            for root, _, files in os.walk(target_dir):
-                for f in sorted(files):
-                    if f.lower().endswith((".mkv", ".mp4")):
-                        full_p = os.path.join(root, f)
-                        if full_p in seen_paths:
+            if series_episodes:
+                print(f"[Curator] [Sonarr] Obtenidos {len(series_episodes)} episodios ordenados canónicamente para '{series_name}'.", flush=True)
+                for ep_info in series_episodes:
+                    full_p = ep_info["path"]
+                    if full_p in seen_paths:
+                        continue
+                    seen_paths.add(full_p)
+
+                    base_no_ext, _ = os.path.splitext(full_p)
+                    has_sub = any(os.path.exists(f"{base_no_ext}{ext}") for ext in [".es-419.ass", ".es.ass", ".es-419.srt", ".es.srt"])
+                    ass_path = f"{base_no_ext}.es-419.ass"
+
+                    s_num = ep_info.get("season", 1)
+                    e_num = ep_info.get("episode", 1)
+
+                    if not has_sub:
+                        # NUEVO EPISODIO: Prioridad máxima para traducir
+                        scored_candidates.append({
+                            "path": full_p,
+                            "title": series_name,
+                            "file_name": os.path.basename(full_p),
+                            "priority": 100,
+                            "season": s_num,
+                            "episode": e_num,
+                            "qa_score": None,
+                            "reason": f"Nuevo S{s_num:02d}E{e_num:02d} sin subtítulo (Sonarr)"
+                        })
+                    else:
+                        qa_score = None
+                        for rec in history:
+                            if rec.get("path") == full_p:
+                                qa_score = rec.get("qa_score")
+                                break
+
+                        if qa_score is None and os.path.isfile(ass_path):
+                            pre_report = evaluate_existing_subtitle_qa(ass_path)
+                            if pre_report:
+                                qa_score = pre_report.get("overall_score")
+
+                        if qa_score is not None and qa_score >= 90.0:
                             continue
-                        seen_paths.add(full_p)
 
-                        base_no_ext, _ = os.path.splitext(full_p)
-                        has_sub = any(os.path.exists(f"{base_no_ext}{ext}") for ext in [".es-419.ass", ".es.ass", ".es-419.srt", ".es.srt"])
-                        ass_path = f"{base_no_ext}.es-419.ass"
-
-                        if not has_sub:
-                            # NUEVO EPISODIO: Prioridad máxima para traducir
-                            scored_candidates.append({
-                                "path": full_p,
-                                "title": series_name,
-                                "file_name": f,
-                                "priority": 100,
-                                "qa_score": None,
-                                "reason": "Nuevo episodio sin subtítulo en español"
-                            })
+                        has_speakers = has_real_speakers(ass_path)
+                        priority = 0
+                        reason = ""
+                        if qa_score is not None and qa_score < 80:
+                            priority = 100 - qa_score
+                            reason = f"Nota QA baja ({qa_score}/100)"
+                        elif qa_score is not None and qa_score < 90:
+                            priority = 50 + (90 - qa_score)
+                            reason = f"Nota Aceptable ({qa_score}/100)"
+                        elif not has_speakers:
+                            priority = 60
+                            reason = "Legacy: sin nota QA ni personajes identificados"
                         else:
-                            # Ya tiene subtítulo: evaluar si requiere remasterización
-                            qa_score = None
-                            for rec in history:
-                                if rec.get("path") == full_p:
-                                    qa_score = rec.get("qa_score")
-                                    break
+                            priority = 30
+                            reason = "Legacy: sin auditoría formal QA"
 
-                            if qa_score is None and os.path.isfile(ass_path):
-                                pre_report = evaluate_existing_subtitle_qa(ass_path)
-                                if pre_report:
-                                    qa_score = pre_report.get("overall_score")
+                        scored_candidates.append({
+                            "path": full_p,
+                            "title": series_name,
+                            "file_name": os.path.basename(full_p),
+                            "priority": priority,
+                            "season": s_num,
+                            "episode": e_num,
+                            "qa_score": qa_score,
+                            "reason": reason
+                        })
 
-                            if qa_score is not None and qa_score >= 90.0:
+            # B. Fallback a escaneo en disco si Sonarr no tiene la serie
+            elif target_dir and os.path.isdir(target_dir):
+                for root, _, files in os.walk(target_dir):
+                    for f in sorted(files):
+                        if f.lower().endswith((".mkv", ".mp4")):
+                            full_p = os.path.join(root, f)
+                            if full_p in seen_paths:
                                 continue
+                            seen_paths.add(full_p)
 
-                            has_speakers = has_real_speakers(ass_path)
-                            priority = 0
-                            reason = ""
-                            if qa_score is not None and qa_score < 80:
-                                priority = 100 - qa_score
-                                reason = f"Nota QA baja ({qa_score}/100)"
-                            elif qa_score is not None and qa_score < 90:
-                                priority = 50 + (90 - qa_score)
-                                reason = f"Nota Aceptable ({qa_score}/100)"
-                            elif not has_speakers:
-                                priority = 60
-                                reason = "Legacy: sin nota QA ni personajes identificados"
+                            base_no_ext, _ = os.path.splitext(full_p)
+                            has_sub = any(os.path.exists(f"{base_no_ext}{ext}") for ext in [".es-419.ass", ".es.ass", ".es-419.srt", ".es.srt"])
+                            ass_path = f"{base_no_ext}.es-419.ass"
+
+                            s_num, e_num = (1, 9999)
+                            if extract_season_episode_fallback:
+                                s_num, e_num = extract_season_episode_fallback(full_p, series_name)
+
+                            if not has_sub:
+                                scored_candidates.append({
+                                    "path": full_p,
+                                    "title": series_name,
+                                    "file_name": f,
+                                    "priority": 100,
+                                    "season": s_num,
+                                    "episode": e_num,
+                                    "qa_score": None,
+                                    "reason": f"Nuevo S{s_num:02d}E{e_num:02d} sin subtítulo (Disco)"
+                                })
                             else:
-                                priority = 30
-                                reason = "Legacy: sin auditoría formal QA"
+                                qa_score = None
+                                for rec in history:
+                                    if rec.get("path") == full_p:
+                                        qa_score = rec.get("qa_score")
+                                        break
 
-                            scored_candidates.append({
-                                "path": full_p,
-                                "title": series_name,
-                                "file_name": f,
-                                "priority": priority,
-                                "qa_score": qa_score,
-                                "reason": reason
-                            })
+                                if qa_score is None and os.path.isfile(ass_path):
+                                    pre_report = evaluate_existing_subtitle_qa(ass_path)
+                                    if pre_report:
+                                        qa_score = pre_report.get("overall_score")
+
+                                if qa_score is not None and qa_score >= 90.0:
+                                    continue
+
+                                has_speakers = has_real_speakers(ass_path)
+                                priority = 0
+                                reason = ""
+                                if qa_score is not None and qa_score < 80:
+                                    priority = 100 - qa_score
+                                    reason = f"Nota QA baja ({qa_score}/100)"
+                                elif qa_score is not None and qa_score < 90:
+                                    priority = 50 + (90 - qa_score)
+                                    reason = f"Nota Aceptable ({qa_score}/100)"
+                                elif not has_speakers:
+                                    priority = 60
+                                    reason = "Legacy: sin nota QA ni personajes identificados"
+                                else:
+                                    priority = 30
+                                    reason = "Legacy: sin auditoría formal QA"
+
+                                scored_candidates.append({
+                                    "path": full_p,
+                                    "title": series_name,
+                                    "file_name": f,
+                                    "priority": priority,
+                                    "season": s_num,
+                                    "episode": e_num,
+                                    "qa_score": qa_score,
+                                    "reason": reason
+                                })
 
     # 2. Barremos el historial para cualquier otro archivo no visto en disco
     for rec in history:
@@ -300,11 +385,17 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
         else:
             continue
 
+        s_num, e_num = (1, 9999)
+        if extract_season_episode_fallback:
+            s_num, e_num = extract_season_episode_fallback(path, title)
+
         scored_candidates.append({
             "path": path,
             "title": title,
             "file_name": os.path.basename(path),
             "priority": priority,
+            "season": s_num,
+            "episode": e_num,
             "qa_score": qa_score,
             "reason": reason
         })
@@ -317,8 +408,12 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
         except Exception as e:
             print(f"[Curator] Error actualizando historial con pre-QA: {e}", flush=True)
 
-    # Ordenar por prioridad descendente y luego por nombre de archivo para orden secuencial
-    scored_candidates.sort(key=lambda x: (-x["priority"], x["file_name"]))
+    # Ordenar estrictamente:
+    # 1. Mayor prioridad (Nuevos episodios = 100, luego QA bajas)
+    # 2. Temporada canónica (Season 1, Season 2...)
+    # 3. Número de episodio canónico (E01, E02, E03...)
+    # 4. Nombre de archivo
+    scored_candidates.sort(key=lambda x: (-x["priority"], x.get("season", 1), x.get("episode", 1), x["file_name"]))
     return scored_candidates[:limit]
 
 def main():
