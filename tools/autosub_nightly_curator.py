@@ -97,10 +97,36 @@ def calculate_budget(history):
 
     return budget, used_today, remaining_quota
 
+def evaluate_existing_subtitle_qa(ass_path, profile_data=None):
+    """Evalúa un subtítulo existente de forma 100% local (0 tokens) para obtener su nota QA."""
+    if not os.path.isfile(ass_path):
+        return None
+    try:
+        from autosub.engine.qa import run_full_subtitle_qa
+        import re
+
+        with open(ass_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+        d_texts = []
+        for line in lines:
+            if line.startswith("Dialogue:"):
+                parts = line.split(",", 9)
+                if len(parts) == 10:
+                    t = parts[9].strip()
+                    t_clean = re.sub(r'\{[^}]*\}', '', t).replace(r'\N', ' ').strip()
+                    if t_clean:
+                        d_texts.append(t_clean)
+        if not d_texts:
+            return None
+        return run_full_subtitle_qa(None, d_texts, profile_data=profile_data, run_llm_check=False)
+    except Exception as e:
+        return None
+
 def find_candidates(history, whitelist=None, limit=10):
     """Encuentra y prioriza los episodios que más se beneficiarían de una remasterización, filtrados por la lista blanca."""
     seen_paths = set()
     scored_candidates = []
+    history_updated = False
 
     # Barremos el historial desde el más reciente al más antiguo para evaluar el último estado procesado
     for rec in history:
@@ -124,6 +150,22 @@ def find_candidates(history, whitelist=None, limit=10):
         ass_path = os.path.join(base_dir, f"{base_name}.es-419.ass")
 
         qa_score = rec.get("qa_score")
+
+        # Triage QA Preventivo (0 tokens): Si no tiene nota pero existe el subtítulo en disco
+        if qa_score is None and os.path.isfile(ass_path):
+            pre_report = evaluate_existing_subtitle_qa(ass_path)
+            if pre_report:
+                qa_score = pre_report.get("overall_score")
+                rec["qa_score"] = qa_score
+                rec["qa_grade"] = pre_report.get("grade")
+                rec["qa_badge"] = pre_report.get("badge")
+                rec["qa_summary"] = pre_report.get("summary_line")
+                history_updated = True
+
+        # Si ya tiene nota y es >= 90 (Aprobado o Excelente), no se toca ni se gastan tokens
+        if qa_score is not None and qa_score >= 90.0:
+            continue
+
         has_speakers = has_real_speakers(ass_path)
 
         priority = 0
@@ -132,11 +174,11 @@ def find_candidates(history, whitelist=None, limit=10):
         # Prioridad 1: Nota QA baja conocida (< 80)
         if qa_score is not None and qa_score < 80:
             priority = 100 - qa_score
-            reason = f"Nota QA baja ({qa_score}/100)"
-        # Prioridad 2: Nota QA moderada (80 a 89, Aceptable)
+            reason = f"Nota QA baja ({qa_score}/100: {rec.get('qa_grade')})"
+        # Prioridad 2: Nota QA moderada (80 a 89.9, Aceptable)
         elif qa_score is not None and qa_score < 90:
             priority = 50 + (90 - qa_score)
-            reason = f"Nota Aceptable ({qa_score}/100)"
+            reason = f"Nota Aceptable ({qa_score}/100: {rec.get('qa_grade')})"
         # Prioridad 3: Subtítulo legacy sin QA y sin diarización de personajes
         elif qa_score is None and not has_speakers:
             priority = 60
@@ -156,6 +198,14 @@ def find_candidates(history, whitelist=None, limit=10):
             "qa_score": qa_score,
             "reason": reason
         })
+
+    if history_updated and os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(history, f, ensure_ascii=False, indent=2)
+            print("[Curator] Historial actualizado con notas de pre-evaluación QA.", flush=True)
+        except Exception as e:
+            print(f"[Curator] Error actualizando historial con pre-QA: {e}", flush=True)
 
     # Ordenar por prioridad descendente y luego por nombre de archivo para orden secuencial
     scored_candidates.sort(key=lambda x: (-x["priority"], x["file_name"]))

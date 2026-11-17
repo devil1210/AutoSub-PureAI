@@ -50,6 +50,10 @@ def process_file(video_path, force=False, context_only=False, target_languages=N
         ctx.current_file_start_time = start_t
         ctx.current_batch_num = 0
         ctx.current_total_batches = 0
+        ctx.current_stage = "Iniciando análisis del archivo..."
+        ctx.current_stage_badge = "Inicio"
+        ctx.current_stage_percent = 2
+        ctx.current_stage_detail = os.path.basename(video_path)
         ctx.last_job_metrics = {}
 
     used_targets = target_languages or app_config.get("target_languages", ["es-419"])
@@ -98,6 +102,10 @@ def process_file(video_path, force=False, context_only=False, target_languages=N
             ctx.current_file_start_time = 0.0
             ctx.current_batch_num = 0
             ctx.current_total_batches = 0
+            ctx.current_stage = ""
+            ctx.current_stage_badge = ""
+            ctx.current_stage_percent = 0
+            ctx.current_stage_detail = ""
     return success
 
 def _process_file_inner(video_path, force=False, context_only=False, target_languages=None):
@@ -211,6 +219,11 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
             return True
 
     try:
+        with processing_lock:
+            ctx.current_stage = "Analizando contenedor MKV..."
+            ctx.current_stage_badge = "Extracción"
+            ctx.current_stage_percent = 5
+            ctx.current_stage_detail = f"Identificando pistas para {series_name}"
         proc = subprocess.run(["mkvmerge", "-J", video_path], capture_output=True, text=True, check=True)
         info = json.loads(proc.stdout)
     except Exception as e:
@@ -247,6 +260,34 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
             out_srt = os.path.join(base_dir, f"{base_name}.{ext_code}.srt")
 
             existing_target_trk = find_matching_target_track(sub_tracks, target_lang) if audit_enabled else None
+            # Triage QA Preventivo para subtítulo ya existente en disco (.es-419.ass)
+            if not existing_target_trk and os.path.isfile(out_ass) and audit_enabled:
+                try:
+                    with open(out_ass, "r", encoding="utf-8", errors="ignore") as f_disk_ass:
+                        disk_lines = f_disk_ass.readlines()
+                    d_indices = []
+                    d_texts = []
+                    for idx, line in enumerate(disk_lines):
+                        if line.startswith("Dialogue:"):
+                            parts = line.split(",", 9)
+                            if len(parts) == 10:
+                                s_name = parts[3].strip()
+                                t_val = parts[9].rstrip("\r\n")
+                                if is_translatable_ass_line(s_name, t_val):
+                                    d_indices.append(idx)
+                                    d_texts.append(t_val)
+                    if d_texts:
+                        pre_qa = run_full_subtitle_qa(None, d_texts, profile_data=profile_data, run_llm_check=False)
+                        if pre_qa.get("overall_score", 0) >= 90.0:
+                            print(f"[AutoSub] 🟢 Subtítulo en disco (.es-419.ass) cumple estándar de calidad: {pre_qa['summary_line']}. Aprobado sin retraducción (0 tokens consumidos).", flush=True)
+                            ctx.last_job_metrics["qa_report"] = pre_qa
+                            ctx.last_job_metrics["lines_count"] = len(d_texts)
+                            ctx.last_job_metrics["format"] = "ASS (En disco aprobado directo)"
+                            any_success = True
+                            continue
+                except Exception as e_disk:
+                    pass
+
             if existing_target_trk:
                 trk_id = existing_target_trk["id"]
                 trk_codec = existing_target_trk.get("codec", "")
@@ -281,18 +322,39 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 ctx.last_job_metrics["format"] = "Contexto (Pista Extraída)"
                                 return True
 
+                            # Triage QA Preventivo (0 tokens): Si el subtítulo existente ya es de alta calidad (>=90)
+                            pre_qa = run_full_subtitle_qa(None, d_texts, profile_data=profile_data, run_llm_check=False)
+                            if pre_qa.get("overall_score", 0) >= 90.0:
+                                print(f"[AutoSub] 🟢 Subtítulo preexistente en español cumple estándar de calidad: {pre_qa['summary_line']}. Aprobado sin retraducción (0 tokens consumidos).", flush=True)
+                                save_ass_and_srt_outputs(out_ass, out_srt, ass_lines, d_indices, d_texts)
+                                ctx.last_job_metrics["qa_report"] = pre_qa
+                                ctx.last_job_metrics["lines_count"] = len(d_texts)
+                                ctx.last_job_metrics["format"] = f"ASS + SRT (Pista {trk_id} Aprobada Directa)"
+                                any_success = True
+                                continue
+
                             ctx.last_job_metrics["lines_count"] = len(d_texts)
                             ctx.last_job_metrics["format"] = f"ASS + SRT (Pista {trk_id} Auditada)"
                             trk_name_lbl = existing_target_trk.get("properties", {}).get("track_name", "")
-                            print(f"[AutoSub] Pista preexistente encontrada para {target_lang} (Pista {trk_id}: {trk_name_lbl}). Auditando y puliendo con IA ({len(d_texts)} líneas)...", flush=True)
+                            print(f"[AutoSub] Pista preexistente encontrada para {target_lang} (Pista {trk_id}: {trk_name_lbl}). Calidad previa insuficiente ({pre_qa.get('overall_score')}/100: {pre_qa.get('grade')}). Auditando y puliendo con IA ({len(d_texts)} líneas)...", flush=True)
 
                             ep_context = generate_and_save_episode_context(series_name, video_path, d_texts, d_texts, profile_data, profile_path)
+                            with processing_lock:
+                                ctx.current_stage = "Auditando y puliendo subtítulos con IA..."
+                                ctx.current_stage_badge = "Auditoría IA"
+                                ctx.current_stage_percent = 60
+                                ctx.current_stage_detail = f"Puliendo {len(d_texts)} líneas"
                             if proofread_enabled:
                                 audited_texts = audit_and_polish_subtitles(d_texts, profile_data, batch_size=batch_size, episode_context=ep_context, target_lang=target_lang)
                             else:
                                 audited_texts = d_texts
 
                             save_ass_and_srt_outputs(out_ass, out_srt, ass_lines, d_indices, audited_texts)
+                            with processing_lock:
+                                ctx.current_stage = "Auditoría de Control de Calidad QA..."
+                                ctx.current_stage_badge = "Control QA"
+                                ctx.current_stage_percent = 95
+                                ctx.current_stage_detail = "Generando métricas de fidelidad y sincronía"
                             try:
                                 qa_report = run_full_subtitle_qa(
                                     d_texts,
@@ -329,6 +391,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 ctx.last_job_metrics["format"] = "Contexto (Pista Extraída)"
                                 return True
 
+                            # Triage QA Preventivo (0 tokens): Si el subtítulo SRT existente ya es de alta calidad (>=90)
+                            pre_qa = run_full_subtitle_qa(None, srt_texts, profile_data=profile_data, run_llm_check=False)
+                            if pre_qa.get("overall_score", 0) >= 90.0:
+                                print(f"[AutoSub] 🟢 Subtítulo SRT preexistente cumple estándar de calidad: {pre_qa['summary_line']}. Aprobado sin retraducción (0 tokens consumidos).", flush=True)
+                                save_srt_output(out_srt, srt_cues, srt_texts)
+                                ctx.last_job_metrics["qa_report"] = pre_qa
+                                ctx.last_job_metrics["lines_count"] = len(srt_texts)
+                                ctx.last_job_metrics["format"] = f"SRT (Pista {trk_id} Aprobada Directa)"
+                                any_success = True
+                                continue
+
                             ctx.last_job_metrics["lines_count"] = len(srt_texts)
                             ctx.last_job_metrics["format"] = f"SRT (Pista {trk_id} Auditada)"
                             ep_context = generate_and_save_episode_context(series_name, video_path, srt_texts, srt_texts, profile_data, profile_path)
@@ -364,6 +437,11 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 temp_ext = ".ass" if src_is_ass else ".srt"
                 temp_file = os.path.join(tempfile.gettempdir(), f"autosub_raw_{int(time.time()*1000)}_{base_name}{temp_ext}")
                 created_temp_files.append(temp_file)
+                with processing_lock:
+                    ctx.current_stage = f"Extrayendo pista de subtítulos ({codec})..."
+                    ctx.current_stage_badge = "Extracción"
+                    ctx.current_stage_percent = 10
+                    ctx.current_stage_detail = f"Pista ID {track_id} ({temp_ext})"
                 subprocess.run(["mkvextract", "tracks", video_path, f"{track_id}:{temp_file}"], check=True, capture_output=True)
                 if not os.path.exists(temp_file) or os.path.getsize(temp_file) == 0:
                     continue
@@ -430,6 +508,11 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 return True
 
             # Identificación y atribución de hablantes (Diarization)
+            with processing_lock:
+                ctx.current_stage = "Mapeando personajes por IA (Gemini 3.8 Flash)..."
+                ctx.current_stage_badge = "Diarización"
+                ctx.current_stage_percent = 15
+                ctx.current_stage_detail = f"Analizando {len(src_texts)} líneas con personajes de {series_name}"
             speakers = attribute_episode_speakers(video_path, src_texts, profile_data)
             ctx.last_job_metrics["lines_count"] = len(src_texts)
             ctx.last_job_metrics["format"] = "ASS + SRT" if source_data["is_ass"] else "SRT"
@@ -457,8 +540,14 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
             for b_idx, chunk in enumerate(chunks):
                 batch_num = (lang_idx * total_batches) + (b_idx + 1)
+                tot_all_batches = total_batches * num_targets
+                trans_pct = min(82, 20 + int(62 * (batch_num / max(1, tot_all_batches))))
                 with processing_lock:
                     ctx.current_batch_num = batch_num
+                    ctx.current_stage = f"Traduciendo lote {batch_num} de {tot_all_batches} ({target_lang})..."
+                    ctx.current_stage_badge = "Traducción"
+                    ctx.current_stage_percent = trans_pct
+                    ctx.current_stage_detail = f"Lote {b_idx+1}/{total_batches} ({len(chunk)} cues) con Gemini 3.5 Flash Lite"
 
                 with cancel_lock:
                     if ctx.cancel_current_flag:
@@ -490,14 +579,29 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 continue
 
             translated_texts = clean_split_dialogue_punctuation(translated_texts)
+            with processing_lock:
+                ctx.current_stage = "Analizando continuidad narrativa (Gemini 4 Hydrogen)..."
+                ctx.current_stage_badge = "Continuidad"
+                ctx.current_stage_percent = 86
+                ctx.current_stage_detail = f"Actualizando resumen, giros de trama y glosario de {series_name}"
             ep_context = generate_and_save_episode_context(series_name, video_path, src_texts, translated_texts, profile_data, profile_path)
 
+            with processing_lock:
+                ctx.current_stage = "Guardando archivos de subtítulos (.ass y .srt)..."
+                ctx.current_stage_badge = "Exportación"
+                ctx.current_stage_percent = 92
+                ctx.current_stage_detail = f"Escribiendo {os.path.basename(out_ass if source_data['is_ass'] else out_srt)}"
             if source_data["is_ass"]:
                 save_ass_and_srt_outputs(out_ass, out_srt, source_data["lines"], source_data["indices"], translated_texts, speakers=speakers)
             else:
                 save_srt_output(out_srt, source_data["cues"], translated_texts)
 
             # Control de Calidad (QA Inspector)
+            with processing_lock:
+                ctx.current_stage = "Auditoría de Control de Calidad QA..."
+                ctx.current_stage_badge = "Control QA"
+                ctx.current_stage_percent = 95
+                ctx.current_stage_detail = "Verificando consistencia semántica, ritmo y gramática"
             try:
                 qa_report = run_full_subtitle_qa(
                     src_texts,
@@ -510,6 +614,12 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 print(f"[QA Inspector] {qa_report['summary_line']}", flush=True)
             except Exception as e_qa:
                 print(f"[QA Inspector] ⚠️ Error ejecutando auditoría QA: {e_qa}", flush=True)
+
+            with processing_lock:
+                ctx.current_stage = "Completado"
+                ctx.current_stage_badge = "Listo"
+                ctx.current_stage_percent = 100
+                ctx.current_stage_detail = "Procesamiento y auditoría finalizados con éxito"
 
             any_success = True
             if num_targets > 1:
