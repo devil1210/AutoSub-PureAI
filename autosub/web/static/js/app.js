@@ -872,7 +872,12 @@ function removeLibraryRow(btn) {
 function loadSettingsForm() {
   document.getElementById('cfg-ollama-ip').value = currentConfig.ollama_ip || '';
   document.getElementById('cfg-ollama-port').value = currentConfig.ollama_port || 11434;
-  document.getElementById('cfg-gemini-key').value = currentConfig.gemini_api_key || '';
+  const gKeys = currentConfig.gemini_api_keys;
+  if (Array.isArray(gKeys) && gKeys.length > 0) {
+    document.getElementById('cfg-gemini-key').value = gKeys.join(', ');
+  } else {
+    document.getElementById('cfg-gemini-key').value = currentConfig.gemini_api_key || '';
+  }
   document.getElementById('cfg-cloud-model').value = currentConfig.cloud_model || 'gemini-3.5-flash-lite';
   const elModel = document.getElementById('cfg-elephant-model');
   if (elModel) {

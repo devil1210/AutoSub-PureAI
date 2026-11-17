@@ -168,8 +168,18 @@ def get_ollama_url():
 def get_ollama_tags_url():
     return f"http://{get_ollama_ip()}:{get_ollama_port()}/api/tags"
 
+def get_gemini_api_keys() -> list[str]:
+    raw = app_config.get("gemini_api_keys") or app_config.get("gemini_api_key", DEFAULT_CONFIG.get("gemini_api_key", ""))
+    if isinstance(raw, list):
+        return [str(k).strip() for k in raw if str(k).strip()]
+    elif isinstance(raw, str):
+        import re
+        return [k.strip() for k in re.split(r"[,;\n]+", raw) if k.strip()]
+    return []
+
 def get_gemini_api_key():
-    return str(app_config.get("gemini_api_key", DEFAULT_CONFIG["gemini_api_key"])).strip()
+    keys = get_gemini_api_keys()
+    return keys[0] if keys else str(app_config.get("gemini_api_key", DEFAULT_CONFIG["gemini_api_key"])).strip()
 
 def get_openrouter_api_key():
     return str(app_config.get("openrouter_api_key", DEFAULT_CONFIG["openrouter_api_key"])).strip()

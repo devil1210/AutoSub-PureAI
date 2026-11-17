@@ -351,10 +351,15 @@ class AutoSubHandler(BaseHTTPRequestHandler):
         if clean_path == "/api/config":
             with ctx.config_lock:
                 for k in ["local_only", "local_model", "cloud_model", "elephant_model", "diarization_model", "enable_openrouter", "batch_size",
-                          "fast_mode", "proofread", "audit_existing", "ollama_ip", "ollama_port", "gemini_api_key",
+                          "fast_mode", "proofread", "audit_existing", "ollama_ip", "ollama_port", "gemini_api_key", "gemini_api_keys",
                           "openrouter_api_key", "watch_paths", "libraries", "source_priority", "target_languages", "curator_whitelist"]:
                     if k in payload:
                         app_config[k] = payload[k]
+                # Sincronizar gemini_api_keys si viene como texto separado por comas
+                if "gemini_api_key" in payload and isinstance(payload["gemini_api_key"], str):
+                    import re
+                    spl = [x.strip() for x in re.split(r"[,;\n]+", payload["gemini_api_key"]) if x.strip()]
+                    app_config["gemini_api_keys"] = spl
                 save_config(app_config)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
