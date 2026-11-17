@@ -317,7 +317,7 @@ class AutoSubHandler(BaseHTTPRequestHandler):
         clean_path = urllib.parse.urlparse(self.path).path
 
         if clean_path == "/api/cancel":
-            with cancel_lock:
+            with ctx.cancel_lock:
                 ctx.cancel_current_flag = True
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
