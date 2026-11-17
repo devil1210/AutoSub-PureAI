@@ -1,69 +1,111 @@
-# AutoSub PureAI 🎬✨
-> **Traductor Inteligente de Subtítulos con Contexto Narrativo y Panel de Control Web v3.5**  
-> *Diseñado para servidores multimedia modernos (Plex, Jellyfin, Emby).*
-
-![AutoSub PureAI Dashboard](docs/screenshots/dashboard.png)
+# AutoSub PureAI v4.0 EGM 🎬✨
+> **Motor Cognitivo Elephant-Goldfish, Curador Nocturno Autónomo y Panel de Control de Subtítulos**  
+> *Diseñado para servidores multimedia modernos (Plex, Jellyfin, Emby) con integración nativa a Sonarr.*
 
 ---
 
-## 🌟 ¿Qué es AutoSub PureAI?
+## 🌟 ¿Qué es AutoSub PureAI v4.0?
 
-A diferencia de los traductores automáticos convencionales que traducen líneas aisladas palabra por palabra (perdiendo el género de los personajes, el tono y los modismos), **AutoSub PureAI** opera bajo un enfoque **100% cognitivo**:
+A diferencia de los traductores automáticos convencionales que traducen líneas aisladas palabra por palabra (perdiendo el género de los personajes, el tono, las muletillas y la coherencia de la trama), **AutoSub PureAI v4.0** opera bajo la arquitectura cognitiva **Elephant-Goldfish (EGM)**:
 
-1. **🧠 Memoria y Perfiles de Serie (.profiles/)**: Extrae y mantiene un archivo JSON con los personajes principales, su rol exacto, pronombres y un glosario unificado para garantizar consistencia entre episodios y temporadas.
-2. **📖 Análisis Contextual Previo**: Lee el episodio completo para entender el clímax, giros argumentales y relaciones entre personajes antes de traducir.
-3. **✨ Revisión y Pulido (Proofreading)**: Ejecuta una segunda pasada de IA al terminar cada lote para verificar fluidez, naturalidad y eliminar cualquier inconsistencia gramatical.
+```
+                  ┌────────────────────────────────────────────────────────┐
+                  │                 🐘 THE ELEPHANT                        │
+                  │  (Memoria a Largo Plazo, Continuidad y Diarización)     │
+                  │  • Perfiles por Serie (.profiles/<serie>.json)         │
+                  │  • Continuidad episódica y evolución de trama          │
+                  │  • Mapeo y atribución de personajes (Hablantes)       │
+                  │  • Triage QA Preventivo (0 tokens para subs aprobados) │
+                  └──────────────────────────┬─────────────────────────────┘
+                                             │ Contexto / Roster / Glosario
+                                             ▼
+                  ┌────────────────────────────────────────────────────────┐
+                  │                 🐟 THE GOLDFISH                        │
+                  │   (Traducción Atómica, Alta Velocidad y Tier 2 Critic) │
+                  │  • Boundary Slicing Dinámico (40-60 cues optimizados)  │
+                  │  • Traducción ultrarrápida (~6-7 min por episodio)     │
+                  │  • Tier 2 Self-Critic (Revisión y pulido en tiempo real)│
+                  │  • Salida dual sincronizada (.es-419.ass + .es-419.srt) │
+                  └──────────────────────────┬─────────────────────────────┘
+                                             │ Subtítulos listos
+                                             ▼
+                  ┌────────────────────────────────────────────────────────┐
+                  │                 🏆 QA INSPECTOR & NOTIFICADOR          │
+                  │  • Auditoría Técnica (CPS, longitud, sintaxis)        │
+                  │  • Auditoría Lingüística (Latino neutro sin calcos)    │
+                  │  • Envío de tarjeta enriquecida a Telegram con nota QA │
+                  └────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 🚀 Características Principales
+## 🚀 Nuevas Capacidades y Arquitectura v4.0 EGM
 
-* **🌐 Soporte para 10 Idiomas de Destino**:
-  - 🇲🇽 **es-419**: Español Latinoamericano neutro (`.es-419.ass` / `.es-419.srt`)
-  - 🇪🇸 **es**: Español de España / Castellano (`.es.ass` / `.es.srt`)
-  - 🇬🇧 **en**: English (`.en.ass` / `.en.srt`)
-  - 🇫🇷 **fr**: Français (`.fr.ass` / `.fr.srt`)
-  - 🇩🇪 **de**: Deutsch (`.de.ass` / `.de.srt`)
-  - 🇧🇷 **pt-BR**: Português do Brasil (`.pt-br.ass` / `.pt-br.srt`)
-  - 🇮🇹 **it**: Italiano (`.it.ass` / `.it.srt`)
-  - 🇯🇵 **ja**: 日本語 (`.ja.ass` / `.ja.srt`)
-  - 🇷🇺 **ru**: Русский (`.ru.ass` / `.ru.srt`)
-  - 🇨🇳 **zh-CN**: 简体中文 (`.zh.ass` / `.zh.srt`)
+### 1. 🐘 The Elephant (Memoria Narrativa y Diarización de Personajes)
+- **Continuidad Episódica**: Mantiene un registro permanente de eventos, relaciones y giros argumentales para que la traducción de cada episodio respete lo ocurrido en capítulos anteriores.
+- **Atribución de Hablantes**: Reconoce qué personaje pronuncia cada línea antes de traducir para asegurar coherencia de género (masculino/femenino), formalidad y registro de voz.
+- **Triage QA Preventivo**: Si un subtítulo ya existente en disco o en el contenedor supera los 90 puntos en la auditoría de calidad, se valida como aprobado sin gastar un solo token de API.
 
-* **🎯 Selección Prioritaria de Pistas Fuente (MKV)**:
-  - Extrae automáticamente la pista de mejor calidad según tu orden de preferencia configurable (ej: 1° Japonés `ja`, 2° Inglés `en`, 3° Francés `fr`...).
+### 2. 🐟 The Goldfish (Lotes Dinámicos de 40 a 60 Cues)
+- **Boundary Slicing Inteligente**: Agrupa los diálogos en bloques naturales respetando pausas y silencios en vez de cortes rígidos.
+- **Velocidad Duplicada**: Reduce el número de peticiones por episodio a más de la mitad, logrando tiempos de traducción de **6 a 7 minutos por episodio** (en lugar de 15 minutos).
+- **Tier 2 Self-Critic**: Revisa cada lote traducido antes de aceptarlo; si detecta calcos o anomalías, aplica correcciones automáticas de forma instantánea.
 
-* **🛡️ Protección Adaptativa de Cuota (Adaptive Batching)**:
-  - Si encolas múltiples idiomas simultáneamente, el sistema reduce dinámicamente el tamaño de los lotes y añade pausas de espaciado para proteger los límites de peticiones por minuto (RPM/TPM) de tu clave de API.
+### 3. 🌙 Curador y Regularizador Nocturno (21:00 PM)
+- **Aprovechamiento de Excedentes de Cuota**: Se ejecuta automáticamente a las **21:00 PM** para regularizar episodios pendientes usando la cuota sobrante del día antes del reinicio diario de Google (05:00 AM).
+- **Integración Nativa con Sonarr**: Consulta canónicamente las series autorizadas directamente desde la API de Sonarr, ordenando los episodios en orden cronológico real (S01E01, S01E02...) sin importar formatos dispares de descarga.
+- **🛡️ Quota Guard (04:30 AM a 05:05 AM)**: Pausa preventiva automática que congela el procesamiento si la sesión se acerca a las 04:30 AM, garantizando que **nunca se consuma la cuota fresca del día siguiente**.
 
-* **📁 Bibliotecas con Nombres Personalizados**:
-  - Organiza tus rutas fácilmente desde la interfaz web (ej: Anime, Películas, Doramas) para clasificar tu catálogo en un solo clic.
+### 4. 📂 Soporte Integral de Subtítulos Externos y Formatos MP4 / MKV
+- **Ingesta Externa Automática**: Si un contenedor `.mp4` o `.mkv` carece de subtítulos incrustados, AutoSub localiza automáticamente el archivo de subtítulos de origen en disco (`.srt`, `.ass`, `.en.srt`, etc.).
+- **Generación Dual Completa**: A partir de cualquier archivo de origen (incluso `.srt` plano), genera tanto el `.es-419.srt` como el `.es-419.ass` con cabeceras de resolución 1080p, márgenes cinematográficos y estilo adaptado para Plex, Jellyfin y Emby.
+- **Diagnóstico Transparente**: Si un archivo no tiene subtítulos en ningún formato, se registra en el historial con el estado explicativo `Error: Sin subtítulos` en lugar de desaparecer silenciosamente.
 
-* **⚡ Arquitectura Multinivel de Modelos de IA**:
-  - **Primario**: `gemini-3.5-flash-lite` (Google AI Studio, ultra veloz ~2.6s por lote).
-  - **Secundario**: `gemini-3.1-flash-lite` y `gemma-4-31b-it` (14,400 peticiones diarias).
-  - **Local Offline**: GPU local mediante Ollama (`qwen3.5:9b`, `qwen3:14b`, etc. con detección automática de estado).
-  - **Opcional**: Fallback a OpenRouter.
+### 5. 🔍 Inspector de Calidad Subtitle QA (0 a 100)
+Cada subtítulo generado o existente es auditado bajo un baremo estricto:
+- **Técnica**: Velocidad de lectura (CPS - Caracteres Por Segundo), líneas desbordadas, corchetes y etiquetas ASS balanceadas.
+- **Lingüística / Dialecto**: Eliminación de términos peninsulares ("vosotros", "coged") hacia español latino neutro y detección de calcos del inglés ("para nada", etc.).
+- **Semántica**: Fidelidad al diálogo original y consistencia con el perfil de la serie.
+- **Medallas**:
+  - 🟢 **Excelente (90 - 100)**: Certificado de máxima fidelidad y naturalidad.
+  - 🟡 **Aceptable (80 - 89)**: Subtítulo fluido con sugerencias menores.
+  - 🔴 **Requiere Revisión (< 80)**: Prioritario para remasterización automática por el Curador.
 
-* **🖥️ Panel de Control Web Completo (Puerto 5055)**:
-  - Monitoreo en vivo de lotes, progreso en tiempo real y tiempos de respuesta.
-  - Encolado por lotes con un solo clic.
-  - Modo *"Solo Extraer Contexto"* (ideal para series que ya tienen subtítulos pero quieres indexar su perfil narrativo).
-  - Editor interactivo de personajes y glosario.
+### 6. 🛡️ Failover Automático y Pool Multi-Cuenta (KeyPool)
+- **Rotación Multi-Key**: Soporta múltiples claves de API de Google Gemini separadas por coma en la configuración para alternar automáticamente en caso de agotar la cuota de una cuenta.
+- **Instant 503 Guard**: Si Google experimenta picos de alta demanda temporal (HTTP 503), el sistema salta de inmediato al siguiente modelo disponible en el pool sin quedarse colgado esperando reintentos lentos.
+
+---
+
+## 🌐 Idiomas de Destino Soportados
+
+| Código | Idioma | Extensiones Generadas |
+| :--- | :--- | :--- |
+| **es-419** | 🇲🇽 Español Latinoamericano Neutro | `.es-419.ass` / `.es-419.srt` |
+| **es** | 🇪🇸 Español de España / Castellano | `.es.ass` / `.es.srt` |
+| **en** | 🇬🇧 English | `.en.ass` / `.en.srt` |
+| **fr** | 🇫🇷 Français | `.fr.ass` / `.fr.srt` |
+| **de** | 🇩🇪 Deutsch | `.de.ass` / `.de.srt` |
+| **pt-BR** | 🇧🇷 Português do Brasil | `.pt-br.ass` / `.pt-br.srt` |
+| **it** | 🇮🇹 Italiano | `.it.ass` / `.it.srt` |
+| **ja** | 🇯🇵 日本語 | `.ja.ass` / `.ja.srt` |
+| **ru** | 🇷🇺 Русский | `.ru.ass` / `.ru.srt` |
+| **zh-CN** | 🇨🇳 简体中文 | `.zh.ass` / `.zh.srt` |
 
 ---
 
 ## 🛠️ Requisitos del Sistema
 
-- **Python 3.10+** (utiliza principalmente la librería estándar).
-- **MKVToolNix** (`mkvmerge` y `mkvextract` instalados en el sistema).
+- **Python 3.10+** (probado en Linux Alpine/Ubuntu y Windows con Python 3.10 a 3.14).
+- **MKVToolNix** (`mkvmerge` y `mkvextract` instalados y accesibles en el `PATH`).
   - En Debian/Ubuntu: `sudo apt install mkvtoolnix`
-  - En Windows: Añadir la carpeta de MKVToolNix al PATH.
-- (Opcional) Clave de API de Google Gemini (nivel gratuito o de pago) y/o Ollama local.
+  - En Alpine Linux: `apk add mkvtoolnix`
+  - En Windows: Añadir la carpeta de MKVToolNix a las Variables de Entorno.
+- (Opcional) Clave de API gratuita de Google Gemini (Google AI Studio) y/o servidor Ollama local con GPU.
 
 ---
 
-## 📦 Instalación Rápida
+## 📦 Instalación y Puesta en Marcha
 
 1. **Clonar el repositorio**:
    ```bash
@@ -71,31 +113,38 @@ A diferencia de los traductores automáticos convencionales que traducen líneas
    cd AutoSub-PureAI
    ```
 
-2. **Configurar variables de entorno**:
+2. **Instalar dependencias**:
    ```bash
-   cp .env.example .env
-   # Edita .env con tus claves o configúralas directamente desde la interfaz web
+   pip install -r requirements.txt
    ```
 
-3. **Iniciar el servidor**:
+3. **Iniciar el servicio**:
    ```bash
    python autosub.py
    ```
 
-4. **Acceder a la Web**:
-   Abre tu navegador en: [http://localhost:5055/](http://localhost:5055/)
+4. **Acceder al Panel de Control Web**:
+   Abre tu navegador en: `http://localhost:5055/` (o la IP de tu servidor Proxmox / LXC / NAS).
 
 ---
 
-## ⚙️ Ajustes del Sistema
+## ⚙️ Configuración y Programación Nocturna
 
-![Ajustes de AutoSub](docs/screenshots/settings.png)
+### Configuración de Sonarr
+En la pestaña **Configuración** del panel web, introduce:
+- **Sonarr URL**: `http://<ip-sonarr>:8989`
+- **Sonarr API Key**: Tu clave de API generada en Sonarr (`Ajustes -> General -> Seguridad`).
 
-Desde la pestaña **Configuración** podrás gestionar:
-- Claves de API (Google Gemini / OpenRouter).
-- Conexión y detección de modelos de tu GPU local con Ollama.
-- Idiomas de salida predeterminados y orden de prioridad de subtítulos en MKV.
-- Lista interactiva de bibliotecas de medios monitoreadas.
+### Programar el Curador Nocturno (Cron)
+Para ejecutar la regularización automática diaria a las **21:00 PM** con la protección de cuota de las 04:30 AM:
+```bash
+0 21 * * * python3 /opt/autosub_nightly_curator.py >> /opt/autosub_curator.log 2>&1
+```
+
+O para simular la ejecución sin consumir tokens:
+```bash
+python3 tools/autosub_nightly_curator.py --dry-run
+```
 
 ---
 
