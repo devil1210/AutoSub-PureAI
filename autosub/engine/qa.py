@@ -151,6 +151,12 @@ def audit_linguistic_heuristics(translated_texts: List[str], profile_data: Dict[
         for pat, desc in PENINSULAR_TERMS.items():
             m = re.search(pat, clean, flags=re.IGNORECASE)
             if m:
+                # Excluir falsos positivos de parentesco familiar real (ej: "tío Julio", "mi tío", "nuestro tío")
+                if "tío" in desc or "tía" in desc:
+                    if re.search(r"\bt[ií][oa]s?\s+[A-ZÁÉÍÓÚÑ]", clean):
+                        continue
+                    if re.search(r"\b(?:el|la|los|las|mi|tu|su|nuestro|nuestra|sus|mis|tus)\s+t[ií][oa]s?\b", clean, flags=re.IGNORECASE):
+                        continue
                 peninsular_found.append({"line": idx + 1, "term": m.group(0), "desc": desc, "text": clean[:60]})
 
         # Calcos

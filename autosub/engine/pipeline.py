@@ -72,9 +72,9 @@ def process_file(video_path, force=False, context_only=False, target_languages=N
         elapsed = time.time() - start_t
         with processing_lock:
             ctx.total_processing_time_sec += elapsed
-            if success:
+            lines = ctx.last_job_metrics.get("lines_count", 0)
+            if success and lines > 0:
                 ctx.completed_jobs_count += 1
-                lines = ctx.last_job_metrics.get("lines_count", 0)
                 fmt = "Contexto" if context_only else f"{ctx.last_job_metrics.get('format', 'SRT')} [{targets_label}]"
                 model_used = app_config.get("local_model") if app_config.get("local_only") else app_config.get("cloud_model")
                 status_txt = "Contexto Extraído" if context_only else "Completado"
