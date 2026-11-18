@@ -59,7 +59,7 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
             else:
                 return None
 
-    is_heavy = bool(preferred_model and (preferred_model in ELEPHANT_MODELS or preferred_model in DIARIZATION_MODELS))
+    is_heavy = bool(preferred_model and preferred_model in ELEPHANT_MODELS and "lite" not in preferred_model)
     wait_for_gemini_slot(is_elephant=is_heavy)
 
     if preferred_model and preferred_model in DIARIZATION_MODELS:

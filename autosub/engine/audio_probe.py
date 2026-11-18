@@ -71,7 +71,7 @@ def build_roster_summary_for_audio(profile_data: Dict[str, Any]) -> str:
         return "Personajes principales de la serie."
 
     lines = []
-    for c in chars[:12]:
+    for c in chars:
         name = c.get("name", "")
         gender = c.get("gender", "")
         pers = c.get("personality", "")

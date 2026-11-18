@@ -23,13 +23,23 @@ def load_cached_speakers(video_path: str, expected_count: int) -> Optional[List[
                 data = json.load(f)
                 speakers = data.get("speakers", [])
                 if isinstance(speakers, list) and len(speakers) == expected_count:
-                    return speakers
+                    valid_count = sum(1 for s in speakers if s and str(s).strip())
+                    # Descartar caché corrupta si no tiene al menos un porcentaje mínimo de hablantes reales (> 20%)
+                    if valid_count >= max(1, int(expected_count * 0.2)):
+                        return speakers
+                    print(f"[Diarization] ⚠️ Caché descartada: insuficiente identificación ({valid_count}/{expected_count}). Re-diarizando con IA...", flush=True)
         except Exception as e:
             print(f"[Diarization] Error leyendo caché de hablantes {cache_file}: {e}", flush=True)
     return None
 
 def save_cached_speakers(video_path: str, speakers: List[str]) -> bool:
-    """Guarda el mapa de hablantes en caché persistente en disco."""
+    """Guarda el mapa de hablantes en caché persistente en disco solo si es válido."""
+    if not speakers:
+        return False
+    valid_count = sum(1 for s in speakers if s and str(s).strip())
+    if valid_count < max(1, int(len(speakers) * 0.15)):
+        print(f"[Diarization] ⚠️ No se guarda en caché: hablantes identificados insuficientes ({valid_count}/{len(speakers)}).", flush=True)
+        return False
     cache_file = get_speaker_cache_path(video_path)
     try:
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
@@ -54,7 +64,7 @@ def build_character_roster_summary(profile_data: Dict[str, Any]) -> str:
         return "Personajes principales de la serie."
 
     lines = []
-    for c in chars[:12]:
+    for c in chars:
         name = c.get("name", "")
         gender = c.get("gender", "")
         pers = c.get("personality", "")
@@ -68,7 +78,7 @@ def attribute_dialogue_chunk(
     series_title: str,
     roster_summary: str,
     chunk_offset: int = 0,
-    model_name: str = "gemini-3.8-flash"
+    model_name: str = "gemini-3.5-flash-lite"
 ) -> List[str]:
     """
     Atribuye el personaje hablante para el guion completo (o bloque grande) usando Gemini 4 Hydrogen.
@@ -87,19 +97,20 @@ def attribute_dialogue_chunk(
     first_no = chunk_offset + 1
     last_no = chunk_offset + count
 
-    sys_prompt = f"""Eres un experto supervisor editorial de guiones de anime y atribución de hablantes (speaker diarization).
+    sys_prompt = f"""Eres un supervisor editorial experto en subtitulaje de anime y atribución de hablantes (speaker diarization).
 SERIE: {series_title}
 
 ELENCO DE PERSONAJES:
 {roster_summary}
-- Extras / Multitud / Narrador
+- Extras / Multitud / Narrador / Canción
 
 Tu tarea es identificar qué personaje dice cada línea de diálogo a partir del contexto continuo de toda la conversación del episodio.
 Reglas:
 1. Usa el nombre exacto del personaje según el elenco cuando sea posible.
 2. Si es un personaje secundario o multitud, usa 'Extra', 'Multitud' o 'Narrador'.
-3. Si la línea no es diálogo (es un cartel, título o sonido ambiente), responde vacío.
-4. Responde ÚNICAMENTE en formato numerado estricto línea por línea, de [{first_no}] a [{last_no}]:
+3. Si la línea es canción o música, usa 'Canción' o déjalo vacío.
+4. Si la línea no es diálogo (es un cartel, título o sonido ambiente), responde vacío.
+5. Responde estrictamente línea por línea:
 [{first_no}] Nombre_Personaje
 [{first_no + 1}] Nombre_Personaje
 ...
@@ -110,20 +121,30 @@ NO agregues explicaciones, notas ni saludos.
     user_prompt = f"Identifica el hablante para las líneas [{first_no}] a [{last_no}]:\n{lines_block}"
 
     for attempt in range(2):
-        resp = call_ai(user_prompt, system_instruction=sys_prompt, timeout=120, allow_cloud_override=True, preferred_model=model_name)
+        resp = call_ai(user_prompt, system_instruction=sys_prompt, timeout=90, allow_cloud_override=True, preferred_model=model_name)
         if resp:
             parsed = {}
             for line in resp.strip().split("\n"):
-                m = re.match(r"^\[?(\d+)\]?[\.\:\)]?\s*(.*)$", line.strip())
+                clean_l = line.strip()
+                if not clean_l:
+                    continue
+                # Soporta tanto [1] Nombre como rangos [1-5] Nombre o **[1-5] Nombre**
+                m = re.search(r"\[?(\d+)(?:\s*[-–]\s*(\d+))?\]?[\.\:\)]?\s*(.*)$", clean_l)
                 if m:
-                    line_no = int(m.group(1))
-                    rel_idx = line_no - chunk_offset - 1
-                    spk = m.group(2).strip()
-                    spk = re.sub(r"^.*?:\s*", "", spk).strip()
-                    if spk.lower() in ["ninguno", "n/a", "none", "-", "cartel", "letrero", "título", "titulo"]:
-                        spk = ""
-                    if 0 <= rel_idx < count:
-                        parsed[rel_idx] = spk
+                    start_no = int(m.group(1))
+                    end_no = int(m.group(2)) if m.group(2) else start_no
+                    raw_spk = m.group(3).strip()
+                    raw_spk = re.sub(r"\(.*?\)", "", raw_spk).strip()
+                    raw_spk = re.sub(r"^\*+|\*+$", "", raw_spk).strip()
+                    raw_spk = re.sub(r"^.*?:\s*", "", raw_spk).strip()
+                    raw_spk = re.sub(r"^[-–—]\s*", "", raw_spk).strip()
+                    if raw_spk.lower() in ["ninguno", "n/a", "none", "-", "cartel", "letrero", "título", "titulo"]:
+                        raw_spk = ""
+
+                    for line_no in range(start_no, end_no + 1):
+                        rel_idx = line_no - chunk_offset - 1
+                        if 0 <= rel_idx < count:
+                            parsed[rel_idx] = raw_spk
 
             # Si el modelo respondió en JSON fallback
             if len(parsed) < count * 0.4:
@@ -139,7 +160,7 @@ NO agregues explicaciones, notas ni saludos.
                 except Exception:
                     pass
 
-            if len(parsed) >= count * 0.5:
+            if len(parsed) >= count * 0.4:
                 return [parsed.get(i, "") for i in range(count)]
         time.sleep(2)
 
@@ -169,12 +190,12 @@ def attribute_episode_speakers(
 
     series_title = profile_data.get("series_title", "Anime") if profile_data else "Anime"
     roster_summary = build_character_roster_summary(profile_data)
-    diarization_model = app_config.get("diarization_model", "gemini-3.8-flash")
+    diarization_model = app_config.get("diarization_model", "gemini-3.5-flash-lite")
 
     print(f"[Diarization] Identificando hablantes para {total} líneas en llamada global con {diarization_model}...", flush=True)
 
-    # Enviar el episodio completo de golpe (450 líneas cubre un episodio normal de 24 min en 1 sola llamada)
-    chunk_size = 450
+    # Enviar en bloques de ~200 líneas para máxima estabilidad y evitar timeouts
+    chunk_size = 200
     all_speakers = []
 
     for start_idx in range(0, total, chunk_size):

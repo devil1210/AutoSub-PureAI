@@ -86,7 +86,7 @@ Genera un JSON con esta estructura exacta:
 Devuelve ÚNICAMENTE el bloque JSON.
 /no_think"""
 
-    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
+    elephant_model = app_config.get("elephant_model", "gemini-3.5-flash")
     resp = call_ai(prompt, system_instruction=sys_prompt, timeout=120, allow_cloud_override=True, preferred_model=elephant_model)
     profile_data = None
     if resp:
@@ -178,7 +178,7 @@ Genera el JSON con el resumen, nuevos personajes, personajes con giros de trama 
 /no_think"""
 
     print(f"[Continuity] Analizando continuidad, personajes y giros de trama para {series_name} - {ep_label}...", flush=True)
-    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
+    elephant_model = app_config.get("elephant_model", "gemini-3.5-flash")
     raw_resp = call_ai(prompt, system_instruction=sys_prompt, timeout=90, allow_cloud_override=True, preferred_model=elephant_model)
 
     summary_text = ""
@@ -356,10 +356,27 @@ def build_scene_brief(profile_data: dict, raw_batch_texts: list[str], prev_conte
         if clean_prev:
             prev_lines_block = "LÍNEAS PREVIAS (REFERENCIA):\n" + "\n".join(clean_prev)
 
-    # 3. Personajes (Roster)
+    # 3. Personajes (Roster priorizado según presencia en escena)
     chars = profile_data.get("characters", [])
+    batch_corpus = " ".join(raw_batch_texts).lower() if raw_batch_texts else ""
+
+    relevant_chars = []
+    other_chars = []
+    for c in chars:
+        c_name = c.get("name", "").strip()
+        if not c_name:
+            continue
+        first_word = c_name.split()[0].lower()
+        if (c_name.lower() in batch_corpus or first_word in batch_corpus or
+            "protagonista" in c.get("personality", "").lower() or
+            (chars and c_name == chars[0].get("name", ""))):
+            relevant_chars.append(c)
+        else:
+            other_chars.append(c)
+
+    ordered_chars = relevant_chars + other_chars
     char_lines = []
-    for c in chars[:10]:
+    for c in ordered_chars[:18]:
         c_name = c.get("name", "").strip()
         if not c_name:
             continue
@@ -385,7 +402,7 @@ def build_scene_brief(profile_data: dict, raw_batch_texts: list[str], prev_conte
     if estimate_tokens(brief) > max_tokens:
         # Paso 2: Compactar personajes (solo nombres y géneros, sin descripción larga)
         compact_chars = []
-        for c in chars[:8]:
+        for c in ordered_chars[:15]:
             c_name = c.get("name", "").strip()
             if not c_name:
                 continue
@@ -397,8 +414,8 @@ def build_scene_brief(profile_data: dict, raw_batch_texts: list[str], prev_conte
         brief = "\n".join(sections)
 
     if estimate_tokens(brief) > max_tokens and len(char_lines) > 5:
-        # Paso 3: Reducir personajes a los 4 principales
-        chars_block = "PERSONAJES:\n" + "\n".join(compact_chars[:4])
+        # Paso 3: Reducir personajes a los 6 más relevantes
+        chars_block = "PERSONAJES:\n" + "\n".join(compact_chars[:6])
         sections = [s for s in [title_line, chars_block, glossary_line] if s]
         brief = "\n".join(sections)
 

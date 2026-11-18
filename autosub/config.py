@@ -49,8 +49,8 @@ DEFAULT_CONFIG = {
     "local_only": False,
     "local_model": "qwen3.5:9b",
     "cloud_model": "gemini-3.5-flash-lite",
-    "elephant_model": "gemini-4-hydrogen",
-    "diarization_model": "gemini-3.8-flash",
+    "elephant_model": "gemini-3.5-flash",
+    "diarization_model": "gemini-3.5-flash-lite",
     "enable_openrouter": False,
     "batch_size": 100,
     "fast_mode": False,
@@ -111,30 +111,27 @@ OR_MODELS = [
 ]
 
 ELEPHANT_MODELS = [
-    "gemini-4-hydrogen",        # 20 RPD / 5 RPM - Máxima inteligencia para Continuidad y Perfil de Serie
-    "gemini-3.7-flash",         # Respaldo alta gama
-    "gemini-3.6-flash",         # Respaldo alta fidelidad
-    "gemini-3-flash",           # Respaldo probado (19 disponibles hoy)
+    "gemini-3.5-flash",         # Modelo insignia para Continuidad y Perfil de Serie
+    "gemini-3-flash-preview",   # Respaldo alta gama
+    "gemini-3.5-flash-lite",    # Respaldo rápido
 ]
 
 DIARIZATION_MODELS = [
-    "gemini-3.8-flash",         # 20 RPD / 5 RPM - Flash ultra-rápido y estructurado para Diarización
-    "gemini-3.7-flash",         # Respaldo alta gama
-    "gemini-3.6-flash",         # Respaldo alta fidelidad
-    "gemini-4-hydrogen",        # Respaldo final
+    "gemini-3.5-flash-lite",    # Rápido y estructurado con alta cuota para Diarización
+    "gemini-3-flash-preview",   # Respaldo alta gama
+    "gemini-3.5-flash",         # Respaldo final
 ]
 
 GEMINI_MODELS = [
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Rápido, alta cuota para The Goldfish
-    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Respaldo Lite (496 disponibles hoy)
-    "gemma-4-31b-it",           # 14.4K RPD / 30 RPM - Respaldo masivo ilimitado
-    "gemma-4-26b-a4b-it",       # 14.4K RPD / 30 RPM
+    "gemini-3-flash-preview",   # Respaldo probado
+    "gemini-3.5-flash",         # Respaldo final
 ]
 
 AUDIO_PROBE_MODELS = [
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Multimodal audio nativo ultra-rápido para verificación quirúrgica
-    "gemini-2.5-flash-lite",    # Respaldo Lite con audio nativo
-    "gemini-3.1-flash-lite",    # Respaldo
+    "gemini-3-flash-preview",   # Respaldo
+    "gemini-3.5-flash",         # Respaldo
 ]
 
 MAX_GEMINI_RPM = 10
