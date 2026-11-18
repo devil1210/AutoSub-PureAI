@@ -34,13 +34,23 @@ CALQUE_TERMS = {
     r"\b[Bb]ravo,\s*debo\s*admitirlo\b": "Bravo, debo admitirlo (calco rígido de 'Bravo, I must say', usar Espléndido, sin duda / Admirable, sin duda)",
 }
 
-QA_ENGLISH_STOPWORDS = {
-    "the", "and", "to", "of", "a", "in", "that", "have", "i", "it", "for",
-    "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his",
-    "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my",
-    "one", "all", "would", "there", "their", "what", "so", "up", "out", "if",
-    "about", "who", "get", "which", "go", "me", "daughter", "debt", "started",
-    "already", "violence", "raw", "thirst", "killing", "sword"
+EXCLUSIVE_ENGLISH_WORDS = {
+    # Pronombres y posesivos exclusivamente ingleses (sin homógrafos españoles como me, he, it, no, so, a)
+    "you", "your", "yours", "yourself", "they", "them", "their", "theirs", "themselves",
+    "we", "our", "ours", "she", "her", "hers", "him", "his", "himself",
+    # Artículos, demostrativos y conectores exclusivamente ingleses
+    "the", "this", "that", "these", "those", "and", "with", "without", "about", "from",
+    # Interrogativos
+    "what", "who", "whom", "whose", "which", "where", "why", "how",
+    # Verbos y modales exclusivos
+    "have", "has", "had", "having", "were", "was", "been", "being",
+    "would", "could", "should", "will", "shall", "does", "did", "doing",
+    "dont", "cant", "wont", "isnt", "arent", "wasnt", "werent", "havent",
+    # Términos comunes de discurso en fansubs
+    "really", "something", "anything", "nothing", "everything", "someone", "anyone", "everyone",
+    "already", "please", "never", "always", "together", "daughter", "father", "mother",
+    "brother", "sister", "sword", "servant", "violence", "started", "getting", "looking", "thinking",
+    "thirst", "killing"
 }
 
 def audit_technical_quality(translated_texts: List[str], durations: List[float] = None) -> Dict[str, Any]:
@@ -149,16 +159,23 @@ def audit_linguistic_heuristics(translated_texts: List[str], profile_data: Dict[
             if m:
                 calques_found.append({"line": idx + 1, "term": m.group(0), "desc": desc, "text": clean[:60]})
 
-        # Detección de fuga de inglés (stopwords)
+        # Detección de fuga de palabras exclusivamente inglesas
         words = re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]+", clean.lower())
-        if words and len(words) >= 3:
-            eng_hits = sum(1 for w in words if w in QA_ENGLISH_STOPWORDS)
-            if eng_hits / len(words) >= 0.35:
-                english_leakage.append({"line": idx + 1, "text": clean[:60], "ratio": round(eng_hits / len(words), 2)})
+        if words and len(words) >= 2:
+            eng_hits = [w for w in words if w in EXCLUSIVE_ENGLISH_WORDS]
+            ratio = len(eng_hits) / len(words)
+            if (len(words) >= 2 and ratio >= 0.4 and len(eng_hits) >= 1) or len(eng_hits) >= 2:
+                english_leakage.append({"line": idx + 1, "text": clean[:60], "ratio": round(ratio, 2)})
 
-        # Detección de líneas truncadas
+        # Detección de líneas truncadas (oración cortada sin continuación en el siguiente subtítulo)
         if re.search(r"\b(en|de|la|el|un|una|con|para|por|a|que|y|o)\s*$", clean, re.IGNORECASE):
-            truncated_lines.append({"line": idx + 1, "text": clean[:60]})
+            is_continuation = False
+            if idx + 1 < total:
+                next_clean = re.sub(r"\{.*?\}|<T\d+>", "", translated_texts[idx + 1]).replace("\\N", " ").strip()
+                if next_clean and next_clean[0].islower():
+                    is_continuation = True
+            if not is_continuation:
+                truncated_lines.append({"line": idx + 1, "text": clean[:60]})
 
     score = 100.0
     if peninsular_found:

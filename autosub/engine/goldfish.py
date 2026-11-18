@@ -97,12 +97,23 @@ def smart_boundary_slicing(items: list, min_chunk: int = 20, max_chunk: int = 35
 
     return slices
 
-ENGLISH_STOPWORDS = {
-    "the", "and", "to", "of", "a", "in", "that", "have", "i", "it", "for",
-    "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his",
-    "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my",
-    "one", "all", "would", "there", "their", "what", "so", "up", "out", "if",
-    "about", "who", "get", "which", "go", "me", "daughter"
+EXCLUSIVE_ENGLISH_WORDS = {
+    # Pronombres y posesivos exclusivamente ingleses (sin homógrafos españoles como me, he, it, no, so, a)
+    "you", "your", "yours", "yourself", "they", "them", "their", "theirs", "themselves",
+    "we", "our", "ours", "she", "her", "hers", "him", "his", "himself",
+    # Artículos, demostrativos y conectores exclusivamente ingleses
+    "the", "this", "that", "these", "those", "and", "with", "without", "about", "from",
+    # Interrogativos
+    "what", "who", "whom", "whose", "which", "where", "why", "how",
+    # Verbos y modales exclusivos
+    "have", "has", "had", "having", "were", "was", "been", "being",
+    "would", "could", "should", "will", "shall", "does", "did", "doing",
+    "dont", "cant", "wont", "isnt", "arent", "wasnt", "werent", "havent",
+    # Términos comunes de discurso en fansubs
+    "really", "something", "anything", "nothing", "everything", "someone", "anyone", "everyone",
+    "already", "please", "never", "always", "together", "daughter", "father", "mother",
+    "brother", "sister", "sword", "servant", "violence", "started", "getting", "looking", "thinking",
+    "thirst", "killing"
 }
 
 def tier1_validate_batch(raw_texts: list[str], translated_texts: list[str], tag_maps: list[dict[str, str]] = None, durations: list[float] = None, target_lang: str = "es-419") -> list[dict]:
@@ -175,26 +186,33 @@ def tier1_validate_batch(raw_texts: list[str], translated_texts: list[str], tag_
                         "detail": f"Línea idéntica al texto de origen en inglés: '{clean_trans}'"
                     })
 
-            # 4b. Fuga de palabras funcionales en inglés (stopwords)
+            # 4b. Fuga de palabras funcionales exclusivamente inglesas
             if is_spanish:
                 words = re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]+", clean_trans.lower())
-                if words and len(words) >= 3:
-                    eng_hits = sum(1 for w in words if w in ENGLISH_STOPWORDS)
-                    if eng_hits / len(words) >= 0.35:
+                if words and len(words) >= 2:
+                    eng_hits = [w for w in words if w in EXCLUSIVE_ENGLISH_WORDS]
+                    ratio = len(eng_hits) / len(words)
+                    if (len(words) >= 2 and ratio >= 0.4 and len(eng_hits) >= 1) or len(eng_hits) >= 2:
                         defects.append({
                             "line": idx,
                             "type": "UNTRANSLATED_ENGLISH",
                             "detail": f"Línea contiene palabras en inglés sin traducir: '{clean_trans}'"
                         })
 
-            # 4c. Detección de oraciones truncadas mid-batch (termina en preposición o conjunción abierta)
+            # 4c. Detección de oraciones truncadas mid-batch (termina en preposición o conjunción abierta sin continuación)
             if re.search(r"\b(en|de|la|el|un|una|con|para|por|a|que|y|o)\s*$", clean_trans, re.IGNORECASE):
                 if not clean_raw.endswith(("...", "…", "-", "—")):
-                    defects.append({
-                        "line": idx,
-                        "type": "TRUNCATED_LINE",
-                        "detail": f"Línea aparentemente truncada a mitad de frase: '{clean_trans}'"
-                    })
+                    is_continuation = False
+                    if idx + 1 < len(translated_texts):
+                        next_c = re.sub(r"\{.*?\}|<T\d+>", "", translated_texts[idx + 1]).replace("\\N", " ").strip()
+                        if next_c and next_c[0].islower():
+                            is_continuation = True
+                    if not is_continuation:
+                        defects.append({
+                            "line": idx,
+                            "type": "TRUNCATED_LINE",
+                            "detail": f"Línea aparentemente truncada a mitad de frase: '{clean_trans}'"
+                        })
 
     return defects
 
