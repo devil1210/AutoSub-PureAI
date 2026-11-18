@@ -75,6 +75,11 @@ Cada subtítulo generado o existente es auditado bajo un baremo estricto:
 - **Rotación Multi-Key**: Soporta múltiples claves de API de Google Gemini separadas por coma en la configuración para alternar automáticamente en caso de agotar la cuota de una cuenta.
 - **Instant 503 Guard**: Si Google experimenta picos de alta demanda temporal (HTTP 503), el sistema salta de inmediato al siguiente modelo disponible en el pool sin quedarse colgado esperando reintentos lentos.
 
+### 7. 🎧 Audio Quirúrgico Spot-Check (Ground-Truth Multimodal en Vivo con Gemini 3.5 Flash-Lite)
+- **Extracción Milimétrica en Memoria**: Ante líneas con ambigüedad de género en inglés (*"I'm ready"*, *"I'm glad"*, *"To be honest"* $\to$ ¿listo o lista?), expresiones exclamativas cortas o dudas de contexto, FFmpeg extrae directamente a memoria (`pipe:1`, 0.1s) los 2 a 4 segundos de audio del archivo de video sin crear archivos temporales en disco.
+- **Multimodalidad Nativa de Gemini**: `gemini-3.5-flash-lite` escucha el fragmento de audio en japonés, identifica el género real del actor o actriz de voz, transcribe el diálogo original (`「ですね。」`) y sugiere la adaptación neutra.
+- **Eficiencia Extrema de Tokens**: Resuelve todas las dudas de género y concordancia consumiendo menos de 1.500 tokens de audio por episodio completo (apenas 10 a 20 micro-consultas), preservando intacta la cuota diaria de API.
+
 ---
 
 ## 🌐 Idiomas de Destino Soportados

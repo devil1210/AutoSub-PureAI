@@ -395,7 +395,7 @@ def translate_atomic_batch(batch_texts: list[str], profile_data: dict, prev_cont
 
     speaker_instruction = ""
     if speakers and any(speakers):
-        speaker_instruction = "\n6. Si una línea indica el hablante entre paréntesis '(Personaje):', úsalo para fijar el tratamiento, género y formalidad. NUNCA repitas el nombre '(Personaje):' en la traducción final."
+        speaker_instruction = "\n6. Si una línea indica el hablante o referencia auditiva '(Personaje [Voz Femenino/Masculino]):', úsala para fijar con total precisión el tratamiento, concordancia de género y formalidad. NUNCA repitas los nombres ni metadatos entre paréntesis en la traducción final."
 
     sys_prompt = f"""Eres un traductor y adaptador profesional de subtítulos de anime al {prompt_lang}.
 {elephant_brief}
@@ -443,7 +443,7 @@ REGLAS CRÍTICAS:
                         if speakers and idx < len(speakers) and speakers[idx]:
                             spk_esc = re.escape(speakers[idx])
                             val = re.sub(r"^\s*\(?" + spk_esc + r"\)?\s*:\s*", "", val, flags=re.IGNORECASE)
-                        val = re.sub(r"^\s*\([A-Za-z0-9_\-\s]+\)\s*:\s*", "", val)
+                        val = re.sub(r"^\s*\([A-Za-z0-9_\-\s\[\]\,\:\.áéíóúñÁÉÍÓÚÑ]+\)\s*:\s*", "", val)
                         parsed_results[idx] = val
 
             if len(parsed_results) == len(batch_texts):

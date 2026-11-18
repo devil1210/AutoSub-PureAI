@@ -21,7 +21,8 @@ from autosub.core.context import (
 )
 from autosub.core.history import format_duration, append_history_record
 from autosub.core.queue import enqueue_retry, save_persisted_queue
-from autosub.engine.diarization import attribute_episode_speakers
+from autosub.engine.audio_probe import refine_dialogue_with_audio_spotcheck
+from autosub.engine.diarization import attribute_episode_speakers, save_cached_speakers
 from autosub.engine.elephant import extract_series_name, get_or_create_series_profile, generate_and_save_episode_context
 from autosub.engine.goldfish import (
     translate_batch,
@@ -477,6 +478,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                             dialogue_indices = []
                             raw_texts = []
                             durations = []
+                            timestamps = []
                             for idx, line in enumerate(lines):
                                 if line.startswith("Dialogue:"):
                                     parts = line.split(",", 9)
@@ -487,14 +489,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                         if is_translatable_ass_line(style_name, txt, eff):
                                             dialogue_indices.append(idx)
                                             raw_texts.append(txt)
-                                            dur = ass_timestamp_to_seconds(parts[2]) - ass_timestamp_to_seconds(parts[1])
-                                            durations.append(max(0.0, dur))
+                                            t_start = ass_timestamp_to_seconds(parts[1])
+                                            t_end = ass_timestamp_to_seconds(parts[2])
+                                            durations.append(max(0.0, t_end - t_start))
+                                            timestamps.append((t_start, t_end))
                             source_data = {
                                 "is_ass": True,
                                 "lines": lines,
                                 "indices": dialogue_indices,
                                 "texts": raw_texts,
                                 "durations": durations,
+                                "timestamps": timestamps,
                                 "track": selected_track
                             }
                         else:
@@ -503,6 +508,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                             blocks = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
                             cues = []
                             durations = []
+                            timestamps = []
                             for b in blocks:
                                 lines = b.split("\n")
                                 if len(lines) >= 3 and "-->" in lines[1]:
@@ -512,14 +518,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                         "lines": lines[2:]
                                     })
                                     p = lines[1].split("-->")
-                                    dur = srt_timestamp_to_seconds(p[1]) - srt_timestamp_to_seconds(p[0])
-                                    durations.append(max(0.0, dur))
+                                    t_start = srt_timestamp_to_seconds(p[0])
+                                    t_end = srt_timestamp_to_seconds(p[1])
+                                    durations.append(max(0.0, t_end - t_start))
+                                    timestamps.append((t_start, t_end))
                             all_texts = ["\\N".join(c["lines"]) for c in cues]
                             source_data = {
                                 "is_ass": False,
                                 "cues": cues,
                                 "texts": all_texts,
                                 "durations": durations,
+                                "timestamps": timestamps,
                                 "track": selected_track
                             }
 
@@ -539,6 +548,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                         dialogue_indices = []
                         raw_texts = []
                         durations = []
+                        timestamps = []
                         for idx, line in enumerate(lines):
                             if line.startswith("Dialogue:"):
                                 parts = line.split(",", 9)
@@ -549,14 +559,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                     if is_translatable_ass_line(style_name, txt, eff):
                                         dialogue_indices.append(idx)
                                         raw_texts.append(txt)
-                                        dur = ass_timestamp_to_seconds(parts[2]) - ass_timestamp_to_seconds(parts[1])
-                                        durations.append(max(0.0, dur))
+                                        t_start = ass_timestamp_to_seconds(parts[1])
+                                        t_end = ass_timestamp_to_seconds(parts[2])
+                                        durations.append(max(0.0, t_end - t_start))
+                                        timestamps.append((t_start, t_end))
                         source_data = {
                             "is_ass": True,
                             "lines": lines,
                             "indices": dialogue_indices,
                             "texts": raw_texts,
                             "durations": durations,
+                            "timestamps": timestamps,
                             "track": {"id": "external", "codec": "SubStationAlpha", "properties": {"language": "und"}}
                         }
                     else:
@@ -565,6 +578,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                         blocks = content.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n\n")
                         cues = []
                         durations = []
+                        timestamps = []
                         for b in blocks:
                             lines = b.split("\n")
                             if len(lines) >= 3 and "-->" in lines[1]:
@@ -574,14 +588,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                     "lines": lines[2:]
                                 })
                                 p = lines[1].split("-->")
-                                dur = srt_timestamp_to_seconds(p[1]) - srt_timestamp_to_seconds(p[0])
-                                durations.append(max(0.0, dur))
+                                t_start = srt_timestamp_to_seconds(p[0])
+                                t_end = srt_timestamp_to_seconds(p[1])
+                                durations.append(max(0.0, t_end - t_start))
+                                timestamps.append((t_start, t_end))
                         all_texts = ["\\N".join(c["lines"]) for c in cues]
                         source_data = {
                             "is_ass": False,
                             "cues": cues,
                             "texts": all_texts,
                             "durations": durations,
+                            "timestamps": timestamps,
                             "track": {"id": "external", "codec": "SubRip/SRT", "properties": {"language": "und"}}
                         }
 
@@ -606,6 +623,25 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
             ctx.last_job_metrics["format"] = "ASS + SRT" if source_data["is_ass"] else "SRT"
             if speakers:
                 ctx.last_job_metrics["speakers_count"] = sum(1 for s in speakers if s)
+
+            # Comprobación de Audio Quirúrgica (Estrategia 1: gemini-3.5-flash-lite)
+            timestamps = source_data.get("timestamps", [])
+            if timestamps and os.path.isfile(video_path):
+                with processing_lock:
+                    ctx.current_stage = "Comprobación de audio en vivo (Gemini 3.5 Flash-Lite)..."
+                    ctx.current_stage_badge = "Audio Probe"
+                    ctx.current_stage_percent = 18
+                    ctx.current_stage_detail = f"Auditoría quirúrgica de género y contexto con {app_config.get('audio_spotcheck_model', 'gemini-3.5-flash-lite')}"
+                speakers, audio_ground_truths = refine_dialogue_with_audio_spotcheck(
+                    video_path,
+                    timestamps,
+                    src_texts,
+                    speakers,
+                    profile_data
+                )
+                if audio_ground_truths:
+                    ctx.last_job_metrics["audio_probed_count"] = len(audio_ground_truths)
+                    save_cached_speakers(video_path, speakers)
 
             packaged_items = [
                 {"text": txt, "duration": dur, "speaker": spk}
