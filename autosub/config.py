@@ -49,8 +49,8 @@ DEFAULT_CONFIG = {
     "local_only": False,
     "local_model": "qwen3.5:9b",
     "cloud_model": "gemini-3.5-flash-lite",
-    "elephant_model": "gemini-3.5-flash",
-    "diarization_model": "gemini-3.5-flash-lite",
+    "elephant_model": "gemini-4-hydrogen",
+    "diarization_model": "gemini-3.8-flash",
     "enable_openrouter": False,
     "batch_size": 100,
     "fast_mode": False,
@@ -111,14 +111,16 @@ OR_MODELS = [
 ]
 
 ELEPHANT_MODELS = [
-    "gemini-3.5-flash",         # Modelo insignia para Continuidad y Perfil de Serie
-    "gemini-3-flash-preview",   # Respaldo alta gama
-    "gemini-3.5-flash-lite",    # Respaldo rápido
+    "gemini-4-hydrogen",        # 20 RPD / 5 RPM - Máxima inteligencia para Continuidad y Perfil de Serie
+    "gemini-3.8-flash",         # Respaldo alta gama
+    "gemini-3.5-flash",         # Respaldo alta fidelidad
+    "gemini-3.5-flash-lite",    # Respaldo ultra-rápido (500 RPD)
 ]
 
 DIARIZATION_MODELS = [
-    "gemini-3.5-flash-lite",    # Rápido y estructurado con alta cuota para Diarización
-    "gemini-3-flash-preview",   # Respaldo alta gama
+    "gemini-3.8-flash",         # 20 RPD / 5 RPM - Flash estructurado para Diarización
+    "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Respaldo de alta velocidad y 500 RPD
+    "gemini-3-flash-preview",   # Respaldo probado
     "gemini-3.5-flash",         # Respaldo final
 ]
 
