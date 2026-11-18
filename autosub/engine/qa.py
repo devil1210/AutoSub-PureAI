@@ -31,6 +31,7 @@ CALQUE_TERMS = {
     r"\bpequeña señorita\b": "pequeña señorita (calco de 'little lady', usar señorita o jovencita)",
     r"\bcrescí\b": "crescí (error ortográfico, usar crecí)",
     r"\b[Mm]f(?:\.{2,3})?\b": "Mf... (interjección o calco no natural en español, usar Este... o Mmm...)",
+    r"\b[Bb]ravo,\s*debo\s*admitirlo\b": "Bravo, debo admitirlo (calco rígido de 'Bravo, I must say', usar Espléndido, sin duda / Admirable, sin duda)",
 }
 
 QA_ENGLISH_STOPWORDS = {

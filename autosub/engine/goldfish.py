@@ -266,6 +266,9 @@ def clean_split_dialogue_punctuation(texts: list[str]) -> list[str]:
         t = re.sub(r"\balgo\s+[hl]isonjeiro\s+así\b", r"algún halago así", t, flags=re.IGNORECASE)
         t = re.sub(r"\b[hl]isonjeir([ao]s?)\b", r"halagador\1", t, flags=re.IGNORECASE)
         t = re.sub(r"\b[Mm]jum(?:\.{1,3})?\b", "Mm.", t)
+        t = re.sub(r"\b[Bb]ravo,\s*debo\s*admitirlo\b", "Espléndido, sin duda", t, flags=re.IGNORECASE)
+        t = re.sub(r"\bseñorita\s+[Cc]riada\b", "Señorita Sirvienta", t)
+        t = re.sub(r"\bseñorita\s+sirvienta\b", "Señorita Sirvienta", t)
         t = re.sub(r"^.*?=>\s*(?:\[\d+\]\s*)?", "", t)
         t = t.replace("«", '"').replace("»", '"')
         cleaned[i] = t
@@ -296,7 +299,8 @@ REGLAS ESTRICTAS:
 1. Devuelve EXACTAMENTE el mismo número de líneas [{len(raw_texts)}] en formato: [N] Texto corregido
 2. Preserva tokens de formato solo si existen en el original. NUNCA inventes etiquetas ni pseudotags (<T0>, etc.) en líneas que no los contengan.
 3. Respeta un ritmo de lectura conciso (máximo 20-25 caracteres por segundo).
-4. No agregues comentarios ni notas explicativas."""
+4. Concordancia y consistencia: Usa masculino/neutro inclusivo para grupos mixtos ('ninguno de ustedes') y mantén mayúsculas consistentes en apodos de combate ('Señorita Sirvienta').
+5. No agregues comentarios ni notas explicativas."""
 
     working_texts = list(translated_texts)
     for attempt in range(max_retries):
@@ -383,8 +387,10 @@ REGLAS CRÍTICAS:
 {tag_rule}
 2. PRESERVA EL SENTIDO EXACTO: NUNCA inviertas afirmaciones ni negaciones.
 3. ESPAÑOL NEUTRO Y CALIDAD DE DOBLAJE:
-   - Cero calcos literales del inglés (ej. 'inconsiderate' -> 'desconsiderada', NUNCA 'inconsiderada'; 'flattery' -> 'halago/cumplido').
+   - Cero calcos literales del inglés (ej. 'inconsiderate' -> 'desconsiderada', NUNCA 'inconsiderada'; 'flattery' -> 'halago/cumplido'; 'Bravo, I must say' -> 'Espléndido/Admirable, sin duda').
    - Vocabulario real: Prohibido inventar palabras o usar morfología híbrida con portugués (cero portuñol).
+   - Concordancia de género en grupos mixtos: Al traducir 'any of you', 'all of you', 'none of you', 'todos', 'ninguno', si la escena incluye varones o el grupo es mixto/indeterminado, usa SIEMPRE el masculino/neutro inclusivo ('ninguno de ustedes', 'todos ustedes'). NUNCA uses femenino plural arbitrario ('ninguna de ustedes').
+   - Homogeneidad de apodos y títulos de combate: Si un personaje compite con un alias o apodo de ring (ej. 'Miss Servant'), mantén la misma traducción homogénea con mayúscula inicial en TODO el episodio ('Señorita Sirvienta') y cuando coreen su nombre ('¡Sirvienta!'). NUNCA mezcles sinónimos ('Criada' vs 'Sirvienta') ni uses minúsculas de sustantivo común ('la señorita sirvienta') cuando sea su alias oficial.
    - Coherencia de pronombres: Al traducir 'they/them', determina los sujetos del contexto previo (padre y madre = 'ellos').
    - Naturalidad de doblaje: Formula frases fluidas y coloquiales acordes a la personalidad y edad de cada personaje.
    - Puntuación: En español latino neutro usa siempre comillas dobles estándar (" ") y NUNCA comillas angulares (« »).
