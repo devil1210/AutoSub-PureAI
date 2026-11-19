@@ -288,26 +288,30 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
             existing_target_trk = find_matching_target_track(sub_tracks, target_lang) if audit_enabled else None
             # Triage QA Preventivo para subtítulo ya existente en disco (.es-419.ass)
-            if not existing_target_trk and os.path.isfile(out_ass) and audit_enabled:
+            if not force and not existing_target_trk and os.path.isfile(out_ass) and audit_enabled:
                 try:
                     with open(out_ass, "r", encoding="utf-8", errors="ignore") as f_disk_ass:
                         disk_lines = f_disk_ass.readlines()
                     d_indices = []
                     d_texts = []
+                    has_spk_count = 0
                     for idx, line in enumerate(disk_lines):
                         if line.startswith("Dialogue:"):
                             parts = line.split(",", 9)
                             if len(parts) == 10:
                                 s_name = parts[3].strip()
+                                actor_name = parts[4].strip()
                                 eff = parts[8].strip()
                                 t_val = parts[9].rstrip("\r\n")
                                 if is_translatable_ass_line(s_name, t_val, eff):
                                     d_indices.append(idx)
                                     d_texts.append(t_val)
-                    if d_texts:
+                                    if actor_name and actor_name.lower() not in ["subtitle", "song", "default", "custom"]:
+                                        has_spk_count += 1
+                    if d_texts and (has_spk_count >= max(1, int(len(d_texts) * 0.2)) or not app_config.get("diarization_model")):
                         pre_qa = run_full_subtitle_qa(None, d_texts, profile_data=profile_data, run_llm_check=False)
                         if pre_qa.get("overall_score", 0) >= 90.0:
-                            print(f"[AutoSub] 🟢 Subtítulo en disco (.es-419.ass) cumple estándar de calidad: {pre_qa['summary_line']}. Aprobado sin retraducción (0 tokens consumidos).", flush=True)
+                            print(f"[AutoSub] 🟢 Subtítulo en disco (.es-419.ass) cumple estándar de calidad ({pre_qa['summary_line']}) y personajes identificados. Aprobado sin retraducción.", flush=True)
                             ctx.last_job_metrics["qa_report"] = pre_qa
                             ctx.last_job_metrics["lines_count"] = len(d_texts)
                             ctx.last_job_metrics["format"] = "ASS (En disco aprobado directo)"
@@ -353,7 +357,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
                             # Triage QA Preventivo (0 tokens): Si el subtítulo existente ya es de alta calidad (>=90)
                             pre_qa = run_full_subtitle_qa(None, d_texts, profile_data=profile_data, run_llm_check=False)
-                            if pre_qa.get("overall_score", 0) >= 90.0:
+                            if not force and pre_qa.get("overall_score", 0) >= 90.0:
                                 print(f"[AutoSub] 🟢 Subtítulo preexistente en español cumple estándar de calidad: {pre_qa['summary_line']}. Aprobado sin retraducción (0 tokens consumidos).", flush=True)
                                 save_ass_and_srt_outputs(out_ass, out_srt, ass_lines, d_indices, d_texts)
                                 ctx.last_job_metrics["qa_report"] = pre_qa
@@ -422,7 +426,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
 
                             # Triage QA Preventivo (0 tokens): Si el subtítulo SRT existente ya es de alta calidad (>=90)
                             pre_qa = run_full_subtitle_qa(None, srt_texts, profile_data=profile_data, run_llm_check=False)
-                            if pre_qa.get("overall_score", 0) >= 90.0:
+                            if not force and pre_qa.get("overall_score", 0) >= 90.0:
                                 print(f"[AutoSub] 🟢 Subtítulo SRT preexistente cumple estándar de calidad: {pre_qa['summary_line']}. Aprobado sin retraducción (0 tokens consumidos).", flush=True)
                                 save_srt_output(out_srt, srt_cues, srt_texts)
                                 ctx.last_job_metrics["qa_report"] = pre_qa
