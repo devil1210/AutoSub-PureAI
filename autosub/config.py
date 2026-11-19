@@ -113,27 +113,30 @@ OR_MODELS = [
 ELEPHANT_MODELS = [
     "gemini-4-hydrogen",        # 20 RPD / 5 RPM - Máxima inteligencia para Continuidad y Perfil de Serie
     "gemini-3.8-flash",         # Respaldo alta gama
+    "gemini-3.6-flash",         # Respaldo alta gama
     "gemini-3.5-flash",         # Respaldo alta fidelidad
     "gemini-3.5-flash-lite",    # Respaldo ultra-rápido (500 RPD)
 ]
 
 DIARIZATION_MODELS = [
     "gemini-3.8-flash",         # 20 RPD / 5 RPM - Flash estructurado para Diarización
+    "gemini-3.6-flash",         # 20 RPD / 5 RPM - Respaldo alta fidelidad
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Respaldo de alta velocidad y 500 RPD
-    "gemini-3-flash-preview",   # Respaldo probado
-    "gemini-3.5-flash",         # Respaldo final
+    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Respaldo de alta cuota
 ]
 
 GEMINI_MODELS = [
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Rápido, alta cuota para The Goldfish
-    "gemini-3-flash-preview",   # Respaldo probado
-    "gemini-3.5-flash",         # Respaldo final
+    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Segundo respaldo de alta cuota (nunca consume modelos de 20 RPD)
+    "gemini-3.8-flash",         # Respaldo alta fidelidad
+    "gemini-3.6-flash",         # Respaldo
 ]
 
 AUDIO_PROBE_MODELS = [
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Multimodal audio nativo ultra-rápido para verificación quirúrgica
-    "gemini-3-flash-preview",   # Respaldo
-    "gemini-3.5-flash",         # Respaldo
+    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Respaldo de alta cuota
+    "gemini-3.8-flash",         # Respaldo
+    "gemini-3.6-flash",         # Respaldo
 ]
 
 MAX_GEMINI_RPM = 10

@@ -78,7 +78,7 @@ def attribute_dialogue_chunk(
     series_title: str,
     roster_summary: str,
     chunk_offset: int = 0,
-    model_name: str = "gemini-3.5-flash-lite"
+    model_name: str = "gemini-3.8-flash"
 ) -> List[str]:
     """
     Atribuye el personaje hablante para el guion completo (o bloque grande) usando Gemini 4 Hydrogen.
@@ -190,7 +190,7 @@ def attribute_episode_speakers(
 
     series_title = profile_data.get("series_title", "Anime") if profile_data else "Anime"
     roster_summary = build_character_roster_summary(profile_data)
-    diarization_model = app_config.get("diarization_model", "gemini-3.5-flash-lite")
+    diarization_model = app_config.get("diarization_model", "gemini-3.8-flash")
 
     print(f"[Diarization] Identificando hablantes para {total} líneas en llamada global con {diarization_model}...", flush=True)
 

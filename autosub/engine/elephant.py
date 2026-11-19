@@ -86,7 +86,7 @@ Genera un JSON con esta estructura exacta:
 Devuelve ÚNICAMENTE el bloque JSON.
 /no_think"""
 
-    elephant_model = app_config.get("elephant_model", "gemini-3.5-flash")
+    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
     resp = call_ai(prompt, system_instruction=sys_prompt, timeout=120, allow_cloud_override=True, preferred_model=elephant_model)
     profile_data = None
     if resp:
@@ -178,7 +178,7 @@ Genera el JSON con el resumen, nuevos personajes, personajes con giros de trama 
 /no_think"""
 
     print(f"[Continuity] Analizando continuidad, personajes y giros de trama para {series_name} - {ep_label}...", flush=True)
-    elephant_model = app_config.get("elephant_model", "gemini-3.5-flash")
+    elephant_model = app_config.get("elephant_model", "gemini-4-hydrogen")
     raw_resp = call_ai(prompt, system_instruction=sys_prompt, timeout=90, allow_cloud_override=True, preferred_model=elephant_model)
 
     summary_text = ""
