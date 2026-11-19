@@ -238,10 +238,10 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
                             if pre_report:
                                 qa_score = pre_report.get("overall_score")
 
-                        if qa_score is not None and qa_score >= 90.0:
+                        has_speakers = has_real_speakers(ass_path)
+                        if qa_score is not None and qa_score >= 90.0 and has_speakers:
                             continue
 
-                        has_speakers = has_real_speakers(ass_path)
                         priority = 0
                         reason = ""
                         if qa_score is not None and qa_score < 80:
@@ -251,8 +251,8 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
                             priority = 50 + (90 - qa_score)
                             reason = f"Nota Aceptable ({qa_score}/100)"
                         elif not has_speakers:
-                            priority = 60
-                            reason = "Legacy: sin nota QA ni personajes identificados"
+                            priority = 55
+                            reason = "Subtítulo pendiente de mapeo de personajes (Diarización)"
                         else:
                             priority = 30
                             reason = "Legacy: sin auditoría formal QA"
@@ -309,10 +309,10 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
                                     if pre_report:
                                         qa_score = pre_report.get("overall_score")
 
-                                if qa_score is not None and qa_score >= 90.0:
+                                has_speakers = has_real_speakers(ass_path)
+                                if qa_score is not None and qa_score >= 90.0 and has_speakers:
                                     continue
 
-                                has_speakers = has_real_speakers(ass_path)
                                 priority = 0
                                 reason = ""
                                 if qa_score is not None and qa_score < 80:
@@ -322,8 +322,8 @@ def find_candidates(history, whitelist=None, app_config=None, limit=10):
                                     priority = 50 + (90 - qa_score)
                                     reason = f"Nota Aceptable ({qa_score}/100)"
                                 elif not has_speakers:
-                                    priority = 60
-                                    reason = "Legacy: sin nota QA ni personajes identificados"
+                                    priority = 55
+                                    reason = "Subtítulo pendiente de mapeo de personajes (Diarización)"
                                 else:
                                     priority = 30
                                     reason = "Legacy: sin auditoría formal QA"
