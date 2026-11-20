@@ -3,7 +3,10 @@ from autosub.engine.elephant import (
     build_scene_brief,
     estimate_tokens,
     extract_series_name,
-    extract_episode_label
+    extract_episode_label,
+    clean_song_text,
+    get_canonical_song_memory,
+    update_canonical_song_memory
 )
 
 class TestElephantMemory(unittest.TestCase):
@@ -79,6 +82,20 @@ class TestElephantMemory(unittest.TestCase):
         ep = extract_episode_label(video_path)
         self.assertEqual(series, "Dungeon Meshi")
         self.assertEqual(ep, "S01E05")
+
+    def test_canonical_song_memory(self):
+        profile = {"series_title": "Test Series"}
+        # Initial is empty
+        self.assertEqual(get_canonical_song_memory(profile, "es-419"), {})
+
+        # Add song line
+        update_canonical_song_memory(profile, "es-419", "{\\fad(150,150)}Yeah!! RESPAWN!!", "[1] ¡Sí! ¡REVIVÍ!")
+        mem = get_canonical_song_memory(profile, "es-419")
+        self.assertIn("Yeah!! RESPAWN!!", mem)
+        self.assertEqual(mem["Yeah!! RESPAWN!!"], "¡Sí! ¡REVIVÍ!")
+
+        # Clean song text helper
+        self.assertEqual(clean_song_text("{\\pos(192,1080)}[4] Nice to SEE YA!!\\N"), "Nice to SEE YA!!")
 
 if __name__ == "__main__":
     unittest.main()

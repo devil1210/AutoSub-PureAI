@@ -23,7 +23,14 @@ from autosub.core.history import format_duration, append_history_record
 from autosub.core.queue import enqueue_retry, save_persisted_queue
 from autosub.engine.audio_probe import refine_dialogue_with_audio_spotcheck
 from autosub.engine.diarization import attribute_episode_speakers, save_cached_speakers
-from autosub.engine.elephant import extract_series_name, get_or_create_series_profile, generate_and_save_episode_context
+from autosub.engine.elephant import (
+    extract_series_name,
+    get_or_create_series_profile,
+    generate_and_save_episode_context,
+    clean_song_text,
+    get_canonical_song_memory,
+    update_canonical_song_memory
+)
 from autosub.engine.goldfish import (
     translate_batch,
     translate_atomic_batch,
@@ -481,6 +488,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 lines = f.readlines()
                             dialogue_indices = []
                             raw_texts = []
+                            styles = []
                             durations = []
                             timestamps = []
                             for idx, line in enumerate(lines):
@@ -493,6 +501,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                         if is_translatable_ass_line(style_name, txt, eff):
                                             dialogue_indices.append(idx)
                                             raw_texts.append(txt)
+                                            styles.append(style_name)
                                             t_start = ass_timestamp_to_seconds(parts[1])
                                             t_end = ass_timestamp_to_seconds(parts[2])
                                             durations.append(max(0.0, t_end - t_start))
@@ -502,6 +511,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 "lines": lines,
                                 "indices": dialogue_indices,
                                 "texts": raw_texts,
+                                "styles": styles,
                                 "durations": durations,
                                 "timestamps": timestamps,
                                 "track": selected_track
@@ -531,6 +541,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                 "is_ass": False,
                                 "cues": cues,
                                 "texts": all_texts,
+                                "styles": [""] * len(all_texts),
                                 "durations": durations,
                                 "timestamps": timestamps,
                                 "track": selected_track
@@ -551,6 +562,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                             lines = f.readlines()
                         dialogue_indices = []
                         raw_texts = []
+                        styles = []
                         durations = []
                         timestamps = []
                         for idx, line in enumerate(lines):
@@ -563,6 +575,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                                     if is_translatable_ass_line(style_name, txt, eff):
                                         dialogue_indices.append(idx)
                                         raw_texts.append(txt)
+                                        styles.append(style_name)
                                         t_start = ass_timestamp_to_seconds(parts[1])
                                         t_end = ass_timestamp_to_seconds(parts[2])
                                         durations.append(max(0.0, t_end - t_start))
@@ -572,6 +585,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                             "lines": lines,
                             "indices": dialogue_indices,
                             "texts": raw_texts,
+                            "styles": styles,
                             "durations": durations,
                             "timestamps": timestamps,
                             "track": {"id": "external", "codec": "SubStationAlpha", "properties": {"language": "und"}}
@@ -601,6 +615,7 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                             "is_ass": False,
                             "cues": cues,
                             "texts": all_texts,
+                            "styles": [""] * len(all_texts),
                             "durations": durations,
                             "timestamps": timestamps,
                             "track": {"id": "external", "codec": "SubRip/SRT", "properties": {"language": "und"}}
@@ -647,14 +662,32 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                     ctx.last_job_metrics["audio_probed_count"] = len(audio_ground_truths)
                     save_cached_speakers(video_path, speakers)
 
-            packaged_items = [
-                {"text": txt, "duration": dur, "speaker": spk}
-                for txt, dur, spk in zip(
-                    source_data["texts"],
-                    source_data.get("durations", [0.0] * len(source_data["texts"])),
-                    speakers if (speakers and len(speakers) == len(source_data["texts"])) else [""] * len(source_data["texts"])
-                )
-            ]
+            # Memoria Canónica de Canciones (Elephant): Detectar OP/ED y temas recurrentes
+            raw_styles = source_data.get("styles", [""] * len(source_data["texts"]))
+            song_memory = get_canonical_song_memory(profile_data, target_lang)
+            SONG_STYLE_KEYWORDS = ("song", "op", "ed", "theme", "opening", "ending", "insert", "lyrics")
+
+            packaged_items = []
+            for idx_src, (txt, dur, spk, sty) in enumerate(zip(
+                source_data["texts"],
+                source_data.get("durations", [0.0] * len(source_data["texts"])),
+                speakers if (speakers and len(speakers) == len(source_data["texts"])) else [""] * len(source_data["texts"]),
+                raw_styles
+            )):
+                clean_src = clean_song_text(txt)
+                is_song = any(k in (sty or "").lower() for k in SONG_STYLE_KEYWORDS) or (clean_src in song_memory)
+                canon_trans = song_memory.get(clean_src) if is_song else None
+                packaged_items.append({
+                    "index": idx_src,
+                    "text": txt,
+                    "clean_text": clean_src,
+                    "duration": dur,
+                    "speaker": spk,
+                    "style": sty,
+                    "is_song": is_song,
+                    "canon_trans": canon_trans
+                })
+
             # Lotes optimizados de 40-60 cues para máxima velocidad y coherencia contextual
             base_b = app_config.get("batch_size", 50)
             target_max = min(60, max(40, base_b))
@@ -687,6 +720,18 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                         print(f"[AutoSub] Cancelado por el usuario: {video_path}", flush=True)
                         break
 
+                # Optimización Elephant: Si todos los cues del lote son canciones ya memorizadas canónicamente
+                all_canonical = all(it.get("canon_trans") for it in chunk)
+                if all_canonical:
+                    chunk_trans = []
+                    for it in chunk:
+                        prefix_tags = "".join(re.findall(r"^\{.*?\}", it["text"]))
+                        chunk_trans.append(f"{prefix_tags}{it['canon_trans']}")
+                    translated_texts.extend(chunk_trans)
+                    prev_ctx = [it["text"] for it in chunk[-2:]]
+                    print(f"[AutoSub] 🎵 Lote {b_idx+1}/{total_batches} ({len(chunk)} cues) resuelto con canciones canónicas memorizadas (0 tokens).", flush=True)
+                    continue
+
                 batch_texts = [it["text"] for it in chunk]
                 batch_durations = [it["duration"] for it in chunk]
                 batch_speakers = [it.get("speaker", "") for it in chunk]
@@ -702,6 +747,17 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
                 if trans is None:
                     translation_success = False
                     break
+
+                # Aplicar consistencia y registrar nuevas canciones aprendidas
+                for idx_it, it in enumerate(chunk):
+                    if it.get("is_song"):
+                        if it.get("canon_trans"):
+                            prefix_tags = "".join(re.findall(r"^\{.*?\}", it["text"]))
+                            trans[idx_it] = f"{prefix_tags}{it['canon_trans']}"
+                        elif idx_it < len(trans) and trans[idx_it]:
+                            update_canonical_song_memory(profile_data, target_lang, it["clean_text"], trans[idx_it])
+                            song_memory[it["clean_text"]] = clean_song_text(trans[idx_it])
+
                 translated_texts.extend(trans)
                 prev_ctx = batch_texts[-2:]
                 time.sleep(0.2)

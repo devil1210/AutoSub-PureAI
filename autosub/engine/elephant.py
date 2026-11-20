@@ -303,6 +303,42 @@ Genera el JSON con el resumen, nuevos personajes, personajes con giros de trama 
 
     return ep_record
 
+def clean_song_text(text: str) -> str:
+    """Limpia etiquetas ASS, saltos de línea y numeración artificial de LLM de una línea de canción."""
+    if not text:
+        return ""
+    t = re.sub(r"\{.*?\}|<T\d+>", "", str(text)).replace("\\N", " ").replace("\\n", " ").strip()
+    t = re.sub(r"^\[\d+\]\s*", "", t)
+    return t.strip()
+
+def get_canonical_song_memory(profile_data: dict, target_lang: str = "es-419") -> dict:
+    """Retorna el diccionario de memoria canónica de canciones para el idioma objetivo."""
+    if not isinstance(profile_data, dict):
+        return {}
+    song_mem = profile_data.get("song_memory", {})
+    if isinstance(song_mem, dict):
+        if target_lang in song_mem and isinstance(song_mem[target_lang], dict):
+            return song_mem[target_lang]
+        if "canonical" in song_mem and isinstance(song_mem["canonical"], dict):
+            return song_mem["canonical"]
+        if any(isinstance(v, str) for v in song_mem.values()):
+            return song_mem
+    return {}
+
+def update_canonical_song_memory(profile_data: dict, target_lang: str, raw_text: str, translated_text: str):
+    """Guarda una línea de canción canónica en la memoria persistente del perfil."""
+    if not isinstance(profile_data, dict):
+        return
+    if "song_memory" not in profile_data or not isinstance(profile_data["song_memory"], dict):
+        profile_data["song_memory"] = {}
+    if target_lang not in profile_data["song_memory"] or not isinstance(profile_data["song_memory"][target_lang], dict):
+        profile_data["song_memory"][target_lang] = {}
+
+    clean_raw = clean_song_text(raw_text)
+    clean_trans = clean_song_text(translated_text)
+    if clean_raw and clean_trans and len(clean_raw) >= 2:
+        profile_data["song_memory"][target_lang][clean_raw] = clean_trans
+
 def estimate_tokens(text: str) -> int:
     """Estimación conservadora de tokens para LLMs multilingües (~3.8 caracteres por token)."""
     if not text:
