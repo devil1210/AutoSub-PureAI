@@ -72,8 +72,8 @@ def has_real_speakers(ass_path):
                 if line.startswith("Dialogue:"):
                     parts = line.split(",", 9)
                     if len(parts) == 10:
-                        spk = parts[3].strip()
-                        if spk and spk.lower() not in ["subtitle", "song", "custom", "subtitle-alt", "default", "signs"]:
+                        actor = parts[4].strip() or parts[3].strip()
+                        if actor and actor.lower() not in ["subtitle", "song", "custom", "subtitle-alt", "default", "signs", "main", "dialogue"]:
                             return True
     except Exception:
         pass

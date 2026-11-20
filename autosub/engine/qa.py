@@ -178,7 +178,8 @@ def audit_linguistic_heuristics(translated_texts: List[str], profile_data: Dict[
             is_continuation = False
             if idx + 1 < total:
                 next_clean = re.sub(r"\{.*?\}|<T\d+>", "", translated_texts[idx + 1]).replace("\\N", " ").strip()
-                if next_clean and next_clean[0].islower():
+                stripped_next = next_clean.lstrip("\"'«“`¡¿(- ")
+                if stripped_next and stripped_next[0].islower():
                     is_continuation = True
             if not is_continuation:
                 truncated_lines.append({"line": idx + 1, "text": clean[:60]})
