@@ -230,31 +230,48 @@ def audit_translation_semantic_sample(
             "notes": "No se requirió auditoría semántica comparativa"
         }
 
-    # Selección estratégica de muestra de líneas
+    # Selección estratégica, diversa y deduplicada de muestra de líneas
     total = len(raw_texts)
     sample_indices = []
+    seen_texts = set()
 
-    # Prioridad 1: Líneas con preguntas o exclamaciones
+    # Prioridad 1: Líneas con preguntas o exclamaciones (distribuidas y deduplicadas)
     for idx, (orig, trans) in enumerate(zip(raw_texts, translated_texts)):
+        clean_norm = re.sub(r"\W+", "", orig.lower())
+        if clean_norm in seen_texts:
+            continue
+        # Evitar clustering excesivo (al menos 3 líneas de distancia entre muestras de apertura/canción)
+        if sample_indices and (idx - sample_indices[-1]) < 3:
+            continue
         if "?" in orig or "!" in orig:
             sample_indices.append(idx)
+            seen_texts.add(clean_norm)
         if len(sample_indices) >= sample_size // 2:
             break
 
     # Prioridad 2: Líneas con conectores de riesgo (or, unless, but, don't, never, if)
     risk_words = re.compile(r"\b(or|unless|never|don't|not|if|without|instead)\b", re.IGNORECASE)
     for idx, orig in enumerate(raw_texts):
-        if idx not in sample_indices and risk_words.search(orig):
+        clean_norm = re.sub(r"\W+", "", orig.lower())
+        if clean_norm in seen_texts or idx in sample_indices:
+            continue
+        if sample_indices and any(abs(idx - s) < 2 for s in sample_indices):
+            continue
+        if risk_words.search(orig):
             sample_indices.append(idx)
+            seen_texts.add(clean_norm)
         if len(sample_indices) >= (sample_size * 3) // 4:
             break
 
-    # Rellenar uniformemente si falta
+    # Rellenar uniformemente si falta para cubrir todo el episodio de forma representativa
     if len(sample_indices) < sample_size:
-        step = max(1, total // (sample_size - len(sample_indices) + 1))
+        needed = sample_size - len(sample_indices)
+        step = max(1, total // (needed + 1))
         for idx in range(0, total, step):
-            if idx not in sample_indices:
+            clean_norm = re.sub(r"\W+", "", raw_texts[idx].lower())
+            if idx not in sample_indices and clean_norm not in seen_texts:
                 sample_indices.append(idx)
+                seen_texts.add(clean_norm)
             if len(sample_indices) >= sample_size:
                 break
 
