@@ -447,13 +447,16 @@ class AutoSubHandler(BaseHTTPRequestHandler):
                 target_languages = None
             enqueued = 0
             if isinstance(paths, list):
-                for p in paths:
+                from autosub.core.queue import sort_jobs_canonically, reorder_job_queue
+                sorted_paths = sort_jobs_canonically(paths)
+                for p in sorted_paths:
                     p_clean = str(p).strip()
                     if p_clean and os.path.exists(p_clean):
                         ctx.job_queue.put((p_clean, force, context_only, target_languages))
                         enqueued += 1
+                reorder_job_queue()
             mode_lbl = "Solo Contexto" if context_only else f"Traducción {target_languages or app_config.get('target_languages', ['es-419'])}"
-            print(f"[AutoSub] Encolados masivamente {enqueued} archivos ({mode_lbl}, force={force}).", flush=True)
+            print(f"[AutoSub] Encolados masivamente {enqueued} archivos en orden de emisión ({mode_lbl}, force={force}).", flush=True)
             self.send_json({"status": "ok", "enqueued_count": enqueued, "context_only": context_only})
             return
 
@@ -476,18 +479,29 @@ class AutoSubHandler(BaseHTTPRequestHandler):
             file_path = payload.get("episodeFile", {}).get("path")
             if file_path:
                 ctx.job_queue.put((file_path, force))
+                from autosub.core.queue import reorder_job_queue
+                reorder_job_queue()
 
         elif "path" in payload:
             path = payload["path"]
             def enqueue_path(p, f):
                 try:
                     if os.path.isdir(p):
+                        found_files = []
                         for root, _, files in os.walk(p):
-                            for file in sorted(files):
+                            for file in files:
                                 if file.lower().endswith((".mkv", ".mp4")):
-                                    ctx.job_queue.put((os.path.join(root, file), f))
+                                    found_files.append(os.path.join(root, file))
+                        from autosub.core.queue import sort_jobs_canonically, reorder_job_queue
+                        sorted_files = sort_jobs_canonically(found_files)
+                        for file_path in sorted_files:
+                            ctx.job_queue.put((file_path, f))
+                        reorder_job_queue()
+                        print(f"[AutoSub] Encolados {len(sorted_files)} episodios de '{p}' en estricto orden de emisión.", flush=True)
                     else:
                         ctx.job_queue.put((p, f))
+                        from autosub.core.queue import reorder_job_queue
+                        reorder_job_queue()
                 except Exception as ex:
                     print(f"[AutoSub] Error encolando path '{p}': {ex}", flush=True)
             import threading

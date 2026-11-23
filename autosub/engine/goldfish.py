@@ -483,8 +483,9 @@ REGLAS CRÍTICAS:
                     break
 
         if attempt < 2:
-            print(f"[Goldfish] ⚠️ Reintentando lote atómico ({attempt+1}/3)...", flush=True)
-            time.sleep(3)
+            backoff_s = 6 * (attempt + 1)
+            print(f"[Goldfish] ⚠️ Reintentando lote atómico ({attempt+1}/3) en {backoff_s}s...", flush=True)
+            time.sleep(backoff_s)
 
     # Si tras 3 intentos aún faltan líneas, traducir individualmente las faltantes NUNCA dejando texto en inglés
     if not translated_masked and parsed_results:

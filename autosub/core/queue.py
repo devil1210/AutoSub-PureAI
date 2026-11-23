@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import collections
 from autosub.config import QUEUE_FILE, app_config
 from autosub.core.context import job_queue, retry_queue, queue_lock, currently_processing
 from autosub.providers.ollama import is_ollama_alive
@@ -67,6 +68,51 @@ def enqueue_retry(video_path, force, series_name, error_reason="", increment_att
             retry_queue[video_path]["next_retry_at"] = time.time() + backoff
         save_persisted_queue()
 
+def sort_jobs_canonically(items):
+    """
+    Ordena una lista de trabajos respetando el orden cronológico/canónico de emisión:
+    1. Agrupa por serie preservando el orden relativo de llegada de cada serie (FIFO entre series).
+    2. Dentro de cada serie, ordena estrictamente por temporada y episodio (seasonNumber, episodeNumber, filename).
+    """
+    if not items:
+        return []
+
+    try:
+        from autosub.engine.elephant import extract_series_name
+    except ImportError:
+        def extract_series_name(p):
+            return os.path.basename(os.path.dirname(p))
+
+    try:
+        from autosub.core.sonarr import extract_season_episode_fallback
+    except ImportError:
+        def extract_season_episode_fallback(p, s=""):
+            import re
+            m = re.search(r'[sS](\d+)[eE](\d+)', p)
+            return (int(m.group(1)), int(m.group(2))) if m else (9999, 9999)
+
+    series_first_seen = {}
+    item_keys = []
+
+    for idx, it in enumerate(items):
+        vpath = it[0] if isinstance(it, (tuple, list)) else str(it)
+        s_name = extract_series_name(vpath).lower() if vpath else ""
+        if s_name not in series_first_seen:
+            series_first_seen[s_name] = len(series_first_seen)
+        
+        s_num, ep_num = extract_season_episode_fallback(vpath, s_name) if vpath else (9999, 9999)
+        item_keys.append((series_first_seen[s_name], s_num, ep_num, os.path.basename(vpath), idx, it))
+
+    item_keys.sort(key=lambda x: (x[0], x[1], x[2], x[3], x[4]))
+    return [x[5] for x in item_keys]
+
+def reorder_job_queue():
+    """Reordena la cola de trabajos de forma canónica y segura bajo el mutex de la cola."""
+    with job_queue.mutex:
+        if len(job_queue.queue) > 1:
+            sorted_items = sort_jobs_canonically(list(job_queue.queue))
+            job_queue.queue = collections.deque(sorted_items)
+
 def check_quota_guard():
     """
     Si estamos en la ventana crítica de 04:30 AM a 05:05 AM, pausa el worker
@@ -87,6 +133,7 @@ def check_quota_guard():
 def queue_worker(process_file_fn):
     while True:
         try:
+            reorder_job_queue()
             item = job_queue.get()
             check_quota_guard()
             if len(item) == 4:
@@ -126,6 +173,9 @@ def retry_worker():
                 in_job_q = any(path == item[0] for item in list(job_queue.queue))
                 if not in_job_q and currently_processing != os.path.basename(path):
                     job_queue.put((path, force, c_only, t_langs))
+
+            if due_items:
+                reorder_job_queue()
         except Exception as e:
             print(f"[Retry Worker Error] {e}", flush=True)
         time.sleep(5)

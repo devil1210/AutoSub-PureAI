@@ -127,13 +127,16 @@ DIARIZATION_MODELS = [
 
 GEMINI_MODELS = [
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Rápido, alta cuota para The Goldfish
-    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Segundo respaldo de alta cuota (nunca consume modelos de 20 RPD)
+    "gemini-flash-lite-latest", # Alias dinámico oficial de Google para última versión Flash Lite
+    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Segundo respaldo de alta cuota
+    "gemini-3.5-flash",         # Respaldo de alta fidelidad
     "gemini-3.8-flash",         # Respaldo alta fidelidad
     "gemini-3.6-flash",         # Respaldo
 ]
 
 AUDIO_PROBE_MODELS = [
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Multimodal audio nativo ultra-rápido para verificación quirúrgica
+    "gemini-flash-lite-latest", # Respaldo dinámico
     "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Respaldo de alta cuota
     "gemini-3.8-flash",         # Respaldo
     "gemini-3.6-flash",         # Respaldo

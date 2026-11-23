@@ -13,6 +13,8 @@ from autosub.providers.rate_limiter import (
     set_gemini_cooldown,
     get_model_cooldown,
     set_model_cooldown,
+    get_audio_cooldown,
+    set_audio_cooldown,
     get_retry_delay_from_error,
     wait_for_gemini_slot
 )
@@ -43,7 +45,7 @@ def mark_key_exhausted(key: str, delay_seconds: float = 3600):
     mask = key[:7] + "..." + key[-4:] if len(key) > 12 else "***"
     print(f"[Gemini KeyPool] ⚠️ Cuenta ({mask}) con cuota diaria alcanzada (bloqueada por {delay_seconds:.0f}s). Rotando a siguiente cuenta activa...", flush=True)
 
-def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=35, preferred_model=None):
+def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=60, preferred_model=None):
     all_keys = get_gemini_api_keys()
     if not all_keys:
         return None
@@ -124,15 +126,48 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=3
                         time.sleep(wait_sec)
                         continue
                 elif err.code == 503:
-                    set_model_cooldown(model_name, 120)
-                    print(f"[Gemini 503] ⚠️ {model_name} con alta demanda temporal en Google (HTTP 503). Saltando inmediatamente a modelo de respaldo...", flush=True)
+                    # Si hay otra cuenta disponible, reintentar con ella antes de abandonar el modelo
+                    other_keys = [k for k in all_keys if k != current_key and _key_cooldowns.get(k, 0) <= time.time()]
+                    if other_keys and attempt < max_retries - 1:
+                        current_key = other_keys[0]
+                        mask = current_key[:7] + "..." + current_key[-4:]
+                        print(f"[Gemini 503 KeyPool] 🔄 Reintentando {model_name} con cuenta alterna ({mask})...", flush=True)
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={current_key}"
+                        time.sleep(2)
+                        continue
+                    set_model_cooldown(model_name, 25)
+                    print(f"[Gemini 503] ⚠️ {model_name} con alta demanda temporal en Google (HTTP 503). Pausa de 25s, saltando a respaldo...", flush=True)
                     break
                 print(f"[Gemini Error] ⚠️ {model_name} HTTP {err.code}: {body[:250]}", flush=True)
                 time.sleep(2)
             except Exception as ex:
                 print(f"[Gemini Error] ⚠️ {model_name} Excepción: {ex}", flush=True)
-                set_model_cooldown(model_name, 300)
+                set_model_cooldown(model_name, 30)
                 break
+
+    # Si todos los modelos están en cooldown temporal por alta demanda de Google pero la espera más corta es <= 40s
+    all_on_cooldown = all(time.time() < get_model_cooldown(m) for m in ordered)
+    if all_on_cooldown:
+        min_cd = min(get_model_cooldown(m) for m in ordered)
+        wait_sec = min_cd - time.time()
+        if 0 < wait_sec <= 40:
+            print(f"[Gemini Cooldown] ⏳ Todos los modelos en cooldown temporal por demanda de Google. Esperando {wait_sec:.1f}s a que se libere el más próximo...", flush=True)
+            time.sleep(wait_sec + 0.5)
+            for model_name in ordered:
+                cd = get_model_cooldown(model_name)
+                if time.time() < cd:
+                    continue
+                current_key = api_key
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={current_key}"
+                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(req, timeout=timeout) as resp:
+                        res = json.loads(resp.read().decode("utf-8"))
+                        raw = res["candidates"][0]["content"]["parts"][0]["text"]
+                        return clean_think_tags(raw)
+                except Exception:
+                    pass
+
     return None
 
 def call_ai(prompt, system_instruction="", timeout=180, allow_cloud_override=False, preferred_model=None):
@@ -154,7 +189,7 @@ def call_gemini_audio(
     preferred_model: str = None,
     response_schema_json: bool = True,
     max_retries: int = 2,
-    timeout: int = 25
+    timeout: int = 40
 ):
     """
     Envía un fragmento de audio en formato WAV (base64 inlineData) a Gemini multimodal.
@@ -203,7 +238,7 @@ def call_gemini_audio(
     data = json.dumps(payload).encode("utf-8")
 
     for model_name in ordered:
-        cd = get_model_cooldown(model_name)
+        cd = get_audio_cooldown(model_name)
         if time.time() < cd:
             continue
 
@@ -231,23 +266,23 @@ def call_gemini_audio(
                             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={current_key}"
                             continue
                         else:
-                            set_model_cooldown(model_name, delay)
+                            set_audio_cooldown(model_name, delay)
                             print(f"[Gemini Audio Quota] ⚠️ Cuota diaria alcanzada para {model_name} ({delay}s). Saltando a siguiente modelo...", flush=True)
                             break
                     else:
-                        set_gemini_cooldown(delay)
+                        set_audio_cooldown(model_name, min(delay, 25))
                         wait_sec = min(delay, 25)
                         print(f"[Gemini Audio RateLimit] ⚠️ 429 en {model_name}. Pausando {wait_sec}s...", flush=True)
                         time.sleep(wait_sec)
                         continue
                 elif err.code == 503:
-                    set_model_cooldown(model_name, 120)
+                    set_audio_cooldown(model_name, 30)
                     print(f"[Gemini Audio 503] ⚠️ {model_name} ocupado (HTTP 503). Saltando a respaldo...", flush=True)
                     break
                 print(f"[Gemini Audio Error] ⚠️ {model_name} HTTP {err.code}: {body[:250]}", flush=True)
                 time.sleep(2)
             except Exception as ex:
                 print(f"[Gemini Audio Error] ⚠️ {model_name} Excepción: {ex}", flush=True)
-                set_model_cooldown(model_name, 300)
+                set_audio_cooldown(model_name, 60)
                 break
     return None

@@ -6,6 +6,7 @@ from autosub.core.context import next_gemini_lock, gemini_rate_lock, gemini_requ
 
 _next_gemini_allowed = 0.0
 _model_cooldowns = {}
+_audio_model_cooldowns = {}
 
 def get_next_gemini_allowed():
     global _next_gemini_allowed
@@ -20,6 +21,14 @@ def set_model_cooldown(model_name: str, delay_seconds: float):
         _model_cooldowns[model_name] = candidate
         print(f"[Gemini Cooldown] Modelo '{model_name}' bloqueado por {delay_seconds:.0f}s "
               f"(hasta {time.strftime('%H:%M:%S', time.localtime(candidate))})", flush=True)
+
+def get_audio_cooldown(model_name: str) -> float:
+    return _audio_model_cooldowns.get(model_name, 0.0)
+
+def set_audio_cooldown(model_name: str, delay_seconds: float):
+    candidate = time.time() + delay_seconds
+    if candidate > _audio_model_cooldowns.get(model_name, 0.0):
+        _audio_model_cooldowns[model_name] = candidate
 
 def set_gemini_cooldown(delay_seconds):
     global _next_gemini_allowed
