@@ -113,5 +113,13 @@ class TestGoldfishQuality(unittest.TestCase):
         restored = unmask_ass_tags(translated_sim, tag_map)
         self.assertEqual(restored, "{\\pos(192,200)\\an8}Texto importante con {\\b1}negrita{\\b0}")
 
+    def test_strip_llm_label_prefix_handles_traduccion_actual(self):
+        from autosub.engine.goldfish import strip_llm_label_prefix, clean_split_dialogue_punctuation
+        self.assertEqual(strip_llm_label_prefix("Traducción actual: Un final que parece una broma."), "Un final que parece una broma.")
+        self.assertEqual(strip_llm_label_prefix("Original: A joke => Traducción actual: Una broma."), "Una broma.")
+        self.assertEqual(strip_llm_label_prefix("{\\i1}Traducción actual: Hola"), "{\\i1}Hola")
+        cleaned = clean_split_dialogue_punctuation(["Traducción actual: No puedo sonreír."])
+        self.assertEqual(cleaned, ["No puedo sonreír."])
+
 if __name__ == "__main__":
     unittest.main()

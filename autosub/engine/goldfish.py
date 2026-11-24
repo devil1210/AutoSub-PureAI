@@ -288,10 +288,27 @@ def clean_split_dialogue_punctuation(texts: list[str]) -> list[str]:
         t = re.sub(r"\bseñorita\s+[Cc]riada\b", "Señorita Sirvienta", t)
         t = re.sub(r"\bseñorita\s+sirvienta\b", "Señorita Sirvienta", t)
         t = re.sub(r"^.*?=>\s*(?:\[\d+\]\s*)?", "", t)
+        t = re.sub(r"^(\s*(?:\{.*?\})*)\s*(?:Traducci[oó]n|Correcci[oó]n|Revisi[oó]n|Texto)\s+(?:actual|corregid[oa]|final)\s*:\s*", r"\1", t, flags=re.IGNORECASE)
         t = t.replace("«", '"').replace("»", '"')
         cleaned[i] = t
 
     return cleaned
+
+_LLM_LABEL_PREFIX_RE = re.compile(
+    r"^(?:.*?(?:\||=>)\s*)?(?:(?:Traducci[oó]n|Correcci[oó]n|Revisi[oó]n|Texto)(?:\s+(?:actual|corregid[oa]|final))?|[A-Za-z0-9\-]+)\s*:\s*",
+    flags=re.IGNORECASE
+)
+
+def strip_llm_label_prefix(text: str) -> str:
+    """Elimina prefijos de etiquetas devueltos por el LLM preservando tags ASS iniciales."""
+    if not text:
+        return text
+    m_tags = re.match(r"^((?:\{.*?\})+)\s*(.*)$", text)
+    if m_tags:
+        tags, rest = m_tags.group(1), m_tags.group(2)
+        cleaned_rest = _LLM_LABEL_PREFIX_RE.sub("", rest).strip()
+        return f"{tags}{cleaned_rest}" if cleaned_rest else text
+    return _LLM_LABEL_PREFIX_RE.sub("", text).strip()
 
 def tier2_proofread_batch(raw_texts: list[str], translated_texts: list[str], profile_data: dict, defects: list[dict], target_lang: str = "es-419", max_retries: int = 2) -> list[str]:
     """
@@ -330,7 +347,7 @@ REGLAS ESTRICTAS:
         user_prompt = f"""DEFECTOS REPORTADOS POR EL VALIDADOR:
 {defects_str}
 
-Corrige los defectos y devuelve la lista completa de {len(raw_texts)} líneas corregidas al {prompt_lang} en formato [1] a [{len(raw_texts)}]:
+Corrige los defectos y devuelve ÚNICAMENTE el texto corregido (SIN repetir 'Original:' ni 'Traducción actual:') en {prompt_lang} de la lista completa de {len(raw_texts)} líneas en formato [1] a [{len(raw_texts)}]:
 """ + "\n".join(numbered_items) + "\n/no_think"
 
         resp = call_ai(user_prompt, system_instruction=sys_prompt, timeout=120)
@@ -342,9 +359,7 @@ Corrige los defectos y devuelve la lista completa de {len(raw_texts)} líneas co
             m = re.match(r"^\[?(\d+)\]?[\.\:\)]?\s*(.*)$", line.strip())
             if m:
                 idx = int(m.group(1)) - 1
-                val = m.group(2).strip()
-                val = re.sub(r"^.*?(?:\||=>)\s*(?:[A-Za-z0-9\-]+|Traducci[oó]n|Correcci[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
-                val = re.sub(r"^(?:[A-Za-z0-9\-]+|Traducci[oó]n|Correcci[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
+                val = strip_llm_label_prefix(m.group(2).strip())
                 if 0 <= idx < len(raw_texts) and val:
                     parsed[idx] = val
 
@@ -607,9 +622,7 @@ REGLAS CRÍTICAS:
             m = re.match(r"^\[?(\d+)\]?[\.\:\)]?\s*(.*)$", line.strip())
             if m:
                 num = int(m.group(1)) - 1
-                val = m.group(2).strip()
-                val = re.sub(r"^.*?(?:\||=>)\s*(?:[A-Za-z0-9\-]+|Traducci[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
-                val = re.sub(r"^(?:[A-Za-z0-9\-]+|Traducci[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
+                val = strip_llm_label_prefix(m.group(2).strip())
                 if 0 <= num < len(batch_raw) and val:
                     parsed_corrections[num] = val
 
@@ -703,9 +716,7 @@ REGLAS CRÍTICAS:
             m = re.match(r"^\[?(\d+)\]?[\.\:\)]?\s*(.*)$", line.strip())
             if m:
                 num = int(m.group(1)) - 1
-                val = m.group(2).strip()
-                val = re.sub(r"^.*?(?:\||=>)\s*(?:[A-Za-z0-9\-]+|Traducci[oó]n|Revisi[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
-                val = re.sub(r"^(?:[A-Za-z0-9\-]+|Traducci[oó]n|Revisi[oó]n):\s*", "", val, flags=re.IGNORECASE).strip()
+                val = strip_llm_label_prefix(m.group(2).strip())
                 if 0 <= num < len(batch) and val:
                     parsed_corrections[num] = val
 

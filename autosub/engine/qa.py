@@ -93,7 +93,7 @@ def audit_technical_quality(translated_texts: List[str], durations: List[float] 
             duplicate_punctuation.append(idx + 1)
 
         # 4. Prefijos residuales del LLM
-        if re.search(r"^(?:\[\d+\]\s*)?(?:[A-Za-z0-9\-]+|Traducci[oó]n|Correcci[oó]n):\s*", text, flags=re.IGNORECASE) or re.search(r"=>\s*\[\d+\]", text):
+        if re.search(r"^(?:\[\d+\]\s*)?(?:(?:Traducci[oó]n|Correcci[oó]n|Revisi[oó]n|Texto)(?:\s+(?:actual|corregid[oa]|final))?|[A-Za-z0-9\-]+):\s*", text, flags=re.IGNORECASE) or re.search(r"=>\s*\[\d+\]", text):
             raw_prefixes.append(idx + 1)
 
     avg_cps = round(sum(cps_values) / len(cps_values), 1) if cps_values else 0.0
