@@ -158,17 +158,9 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=6
                         time.sleep(wait_sec)
                         continue
                 elif err.code == 503:
-                    # Si hay otra cuenta disponible, reintentar con ella antes de abandonar el modelo
-                    other_keys = [k for k in all_keys if k != current_key and _key_cooldowns.get(k, 0) <= time.time()]
-                    if other_keys and attempt < max_retries - 1:
-                        current_key = other_keys[0]
-                        mask = current_key[:7] + "..." + current_key[-4:]
-                        print(f"[Gemini 503 KeyPool] 🔄 Reintentando {model_name} con cuenta alterna ({mask})...", flush=True)
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={current_key}"
-                        time.sleep(2)
-                        continue
+                    # 503 es saturación de servidor del modelo en Google: saltar de inmediato a otro modelo distinto
                     set_model_cooldown(model_name, 25)
-                    print(f"[Gemini 503] ⚠️ {model_name} con alta demanda temporal en Google (HTTP 503). Pausa de 25s, saltando a respaldo...", flush=True)
+                    print(f"[Gemini 503] ⚠️ {model_name} saturado en Google (HTTP 503). Pausa de 25s, saltando a modelo alterno...", flush=True)
                     break
                 print(f"[Gemini Error] ⚠️ {model_name} HTTP {err.code}: {body[:250]}", flush=True)
                 time.sleep(2)

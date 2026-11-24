@@ -284,6 +284,8 @@ def clean_split_dialogue_punctuation(texts: list[str]) -> list[str]:
         t = re.sub(r"\balgo\s+[hl]isonjeiro\s+así\b", r"algún halago así", t, flags=re.IGNORECASE)
         t = re.sub(r"\b[hl]isonjeir([ao]s?)\b", r"halagador\1", t, flags=re.IGNORECASE)
         t = re.sub(r"\b[Mm]jum(?:\.{1,3})?\b", "Mm.", t)
+        t = re.sub(r"\b[Hh]?[Mm]ph\b", "Jum", t)
+        t = re.sub(r"\b[Tt]ch\b", "Tsk", t)
         t = re.sub(r"\b[Bb]ravo,\s*debo\s*admitirlo\b", "Espléndido, sin duda", t, flags=re.IGNORECASE)
         t = re.sub(r"\bseñorita\s+[Cc]riada\b", "Señorita Sirvienta", t)
         t = re.sub(r"\bseñorita\s+sirvienta\b", "Señorita Sirvienta", t)

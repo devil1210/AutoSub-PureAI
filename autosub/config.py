@@ -117,6 +117,7 @@ ELEPHANT_MODELS = [
     "gemini-3.6-flash",         # Respaldo alta gama
     "gemini-3.5-flash",         # Respaldo alta fidelidad
     "gemini-3.5-flash-lite",    # Respaldo ultra-rápido (500 RPD)
+    "gemma-4-31b-it",           # Respaldo independiente (14.4K RPD / 30 RPM)
 ]
 
 DIARIZATION_MODELS = [
@@ -124,15 +125,18 @@ DIARIZATION_MODELS = [
     "gemini-3.6-flash",         # 20 RPD / 5 RPM - Respaldo alta fidelidad
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Respaldo de alta velocidad y 500 RPD
     "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Respaldo de alta cuota
+    "gemma-4-31b-it",           # Respaldo independiente (14.4K RPD / 30 RPM)
+    "gemma-4-26b-a4b-it",       # Respaldo independiente (14.4K RPD / 30 RPM)
 ]
 
 GEMINI_MODELS = [
     "gemini-3.5-flash-lite",    # 500 RPD / 15 RPM - Rápido, alta cuota para The Goldfish
-    "gemini-flash-lite-latest", # Alias dinámico oficial de Google para última versión Flash Lite
-    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Segundo respaldo de alta cuota
+    "gemini-3.1-flash-lite",    # 500 RPD / 15 RPM - Segundo respaldo real de alta cuota
     "gemini-3.5-flash",         # Respaldo de alta fidelidad
     "gemini-3.8-flash",         # Respaldo alta fidelidad
     "gemini-3.6-flash",         # Respaldo
+    "gemma-4-26b-a4b-it",       # Respaldo independiente (14.4K RPD / 30 RPM)
+    "gemma-4-31b-it",           # Respaldo independiente (14.4K RPD / 30 RPM)
 ]
 
 AUDIO_PROBE_MODELS = [

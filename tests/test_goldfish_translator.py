@@ -120,6 +120,8 @@ class TestGoldfishQuality(unittest.TestCase):
         self.assertEqual(strip_llm_label_prefix("{\\i1}Traducción actual: Hola"), "{\\i1}Hola")
         cleaned = clean_split_dialogue_punctuation(["Traducción actual: No puedo sonreír."])
         self.assertEqual(cleaned, ["No puedo sonreír."])
+        self.assertEqual(clean_split_dialogue_punctuation(["Mph, qué decepción."]), ["Jum, qué decepción."])
+        self.assertEqual(clean_split_dialogue_punctuation(["Tch, qué molestia."]), ["Tsk, qué molestia."])
 
 if __name__ == "__main__":
     unittest.main()

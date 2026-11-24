@@ -641,8 +641,15 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
             speakers = attribute_episode_speakers(video_path, src_texts, profile_data)
             ctx.last_job_metrics["lines_count"] = len(src_texts)
             ctx.last_job_metrics["format"] = "ASS + SRT" if source_data["is_ass"] else "SRT"
+            identified_cnt = sum(1 for s in speakers if s) if speakers else 0
             if speakers:
-                ctx.last_job_metrics["speakers_count"] = sum(1 for s in speakers if s)
+                ctx.last_job_metrics["speakers_count"] = identified_cnt
+
+            # Salvaguarda de calidad: no traducir a ciegas si la diarización falló (<25% en episodio completo)
+            if len(src_texts) >= 30 and identified_cnt < max(1, int(len(src_texts) * 0.25)):
+                raise RuntimeError(
+                    f"Diarización insuficiente ({identified_cnt}/{len(src_texts)} hablantes) por saturación de IA; posponiendo para evitar errores de género y trato."
+                )
 
             # Comprobación de Audio Quirúrgica (Estrategia 1: gemini-3.5-flash-lite)
             timestamps = source_data.get("timestamps", [])

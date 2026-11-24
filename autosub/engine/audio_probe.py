@@ -129,7 +129,8 @@ def probe_cue_ground_truth(
     cue_text: str,
     series_title: str,
     roster_summary: str,
-    model_name: str = None
+    model_name: str = None,
+    glossary: Dict[str, str] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Extrae el fragmento de audio y consulta a Gemini multimodal (gemini-3.5-flash-lite)
@@ -140,13 +141,22 @@ def probe_cue_ground_truth(
         return None
 
     clean_cue = re.sub(r"\{.*?\}", "", cue_text).replace("\\N", " ").strip()
+    glossary_block = ""
+    if glossary and isinstance(glossary, dict):
+        matched_terms = [
+            f"- {k} -> {v}"
+            for k, v in glossary.items()
+            if k and v and k.lower() in clean_cue.lower()
+        ]
+        if matched_terms:
+            glossary_block = "\nGLOSARIO OFICIAL OBLIGATORIO (respeta mayúsculas exactas):\n" + "\n".join(matched_terms[:10]) + "\n"
 
     prompt = f"""Escucha atentamente este fragmento de audio en japonés de anime.
 SERIE: {series_title}
 TEXTO EN SUBTÍTULO (referencia en inglés): "{clean_cue}"
 
 ELENCO DE PERSONAJES:
-{roster_summary}
+{roster_summary}{glossary_block}
 
 Determina con precisión quién habla, su género y lo que realmente se escucha en japonés.
 Responde estrictamente en JSON con la siguiente estructura:
@@ -217,7 +227,8 @@ def refine_dialogue_with_audio_spotcheck(
             end_sec,
             cue_text,
             series_title,
-            roster_summary
+            roster_summary,
+            glossary=profile_data.get("glossary") if profile_data else None
         )
 
         if res and isinstance(res, dict):

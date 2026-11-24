@@ -207,6 +207,23 @@ def attribute_episode_speakers(
             chunk_offset=start_idx,
             model_name=diarization_model
         )
+        # Si el bloque grande falló por saturación/503, reintentar en sub-bloques más pequeños (100 líneas)
+        if sum(1 for s in chunk_speakers if s) == 0 and len(chunk) > 80:
+            print(f"[Diarization] ⚠️ Bloque [{start_idx+1}-{start_idx+len(chunk)}] sin respuesta; reintentando en sub-bloques...", flush=True)
+            time.sleep(4)
+            sub_size = max(50, len(chunk) // 2)
+            recovered_chunk = []
+            for sub_start in range(0, len(chunk), sub_size):
+                sub_chunk = chunk[sub_start:sub_start + sub_size]
+                sub_res = attribute_dialogue_chunk(
+                    sub_chunk,
+                    series_title=series_title,
+                    roster_summary=roster_summary,
+                    chunk_offset=start_idx + sub_start,
+                    model_name=diarization_model
+                )
+                recovered_chunk.extend(sub_res)
+            chunk_speakers = recovered_chunk
         all_speakers.extend(chunk_speakers)
 
     # Asegurar longitud exacta
