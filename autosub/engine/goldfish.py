@@ -226,7 +226,7 @@ def clean_split_dialogue_punctuation(texts: list[str]) -> list[str]:
       Sub 2: '¿guerreros de todo el reino...?' (reabre redundantemente)
       Resultado Sub 2: 'guerreros de todo el reino...?'
     """
-    if not texts or len(texts) < 2:
+    if not texts:
         return texts
 
     cleaned = list(texts)
