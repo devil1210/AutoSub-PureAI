@@ -24,6 +24,33 @@ _key_cooldowns = {}   # {key: timestamp_until_available}
 _key_index = 0
 _key_lock = threading.Lock()
 
+GEMINI_SAFETY_SETTINGS = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_CIVIC_INTEGRITY", "threshold": "BLOCK_NONE"}
+]
+
+def extract_gemini_text(res: dict) -> str:
+    """Extrae de forma segura el texto de la respuesta de Gemini descartando pensamientos y manejando filtros."""
+    if not isinstance(res, dict):
+        return ""
+    candidates = res.get("candidates") or []
+    if not candidates:
+        return ""
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+    if not parts:
+        return ""
+    text_parts = [p.get("text", "") for p in parts if "text" in p and not p.get("thought")]
+    if text_parts:
+        return clean_think_tags("".join(text_parts))
+    for p in parts:
+        if "text" in p and p["text"]:
+            return clean_think_tags(p["text"])
+    return ""
+
 def get_next_gemini_key() -> str:
     global _key_index
     keys = get_gemini_api_keys()
@@ -83,7 +110,8 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=6
         "generationConfig": {
             "maxOutputTokens": 8192,
             "temperature": 0.2
-        }
+        },
+        "safetySettings": GEMINI_SAFETY_SETTINGS
     }
     data = json.dumps(payload).encode("utf-8")
 
@@ -99,8 +127,12 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=6
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     res = json.loads(resp.read().decode("utf-8"))
-                    raw = res["candidates"][0]["content"]["parts"][0]["text"]
-                    return clean_think_tags(raw)
+                    text = extract_gemini_text(res)
+                    if text:
+                        return text
+                    if res.get("promptFeedback", {}).get("blockReason") or (res.get("candidates") and res["candidates"][0].get("finishReason") == "SAFETY"):
+                        print(f"[Gemini Safety] ⚠️ {model_name} bloqueado por política de contenido en este texto. Saltando...", flush=True)
+                        break
             except urllib.error.HTTPError as err:
                 body = err.read().decode("utf-8", errors="ignore")
                 if err.code == 429:
@@ -163,8 +195,9 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=6
                 try:
                     with urllib.request.urlopen(req, timeout=timeout) as resp:
                         res = json.loads(resp.read().decode("utf-8"))
-                        raw = res["candidates"][0]["content"]["parts"][0]["text"]
-                        return clean_think_tags(raw)
+                        text = extract_gemini_text(res)
+                        if text:
+                            return text
                 except Exception:
                     pass
 
@@ -233,7 +266,8 @@ def call_gemini_audio(
 
     payload = {
         "contents": contents,
-        "generationConfig": gen_config
+        "generationConfig": gen_config,
+        "safetySettings": GEMINI_SAFETY_SETTINGS
     }
     data = json.dumps(payload).encode("utf-8")
 
@@ -249,8 +283,12 @@ def call_gemini_audio(
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     res = json.loads(resp.read().decode("utf-8"))
-                    raw = res["candidates"][0]["content"]["parts"][0]["text"]
-                    return clean_think_tags(raw)
+                    text = extract_gemini_text(res)
+                    if text:
+                        return text
+                    if res.get("promptFeedback", {}).get("blockReason") or (res.get("candidates") and res["candidates"][0].get("finishReason") == "SAFETY"):
+                        print(f"[Gemini Audio Safety] ⚠️ {model_name} bloqueado por política de contenido en audio probe. Saltando...", flush=True)
+                        break
             except urllib.error.HTTPError as err:
                 body = err.read().decode("utf-8", errors="ignore")
                 if err.code == 429:
