@@ -105,8 +105,8 @@ EXCLUSIVE_ENGLISH_WORDS = {
     "the", "this", "that", "these", "those", "and", "with", "without", "about", "from",
     # Interrogativos
     "what", "who", "whom", "whose", "which", "where", "why", "how",
-    # Verbos y modales exclusivos
-    "have", "has", "had", "having", "were", "was", "been", "being",
+    # Verbos y modales exclusivos (excluyendo homógrafos españoles como has)
+    "have", "had", "having", "were", "was", "been", "being",
     "would", "could", "should", "will", "shall", "does", "did", "doing",
     "dont", "cant", "wont", "isnt", "arent", "wasnt", "werent", "havent",
     # Términos comunes de discurso en fansubs
