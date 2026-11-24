@@ -129,6 +129,8 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=6
                     res = json.loads(resp.read().decode("utf-8"))
                     text = extract_gemini_text(res)
                     if text:
+                        mask = current_key[:7] + "..." + current_key[-4:] if len(current_key) > 12 else "***"
+                        print(f"[Gemini OK] ✅ {model_name} ({mask})", flush=True)
                         return text
                     if res.get("promptFeedback", {}).get("blockReason") or (res.get("candidates") and res["candidates"][0].get("finishReason") == "SAFETY"):
                         print(f"[Gemini Safety] ⚠️ {model_name} bloqueado por política de contenido en este texto. Saltando...", flush=True)
@@ -189,6 +191,8 @@ def call_gemini_fallback(prompt, system_instruction="", max_retries=2, timeout=6
                         res = json.loads(resp.read().decode("utf-8"))
                         text = extract_gemini_text(res)
                         if text:
+                            mask = current_key[:7] + "..." + current_key[-4:] if len(current_key) > 12 else "***"
+                            print(f"[Gemini OK] ✅ {model_name} ({mask})", flush=True)
                             return text
                 except Exception:
                     pass
@@ -277,6 +281,8 @@ def call_gemini_audio(
                     res = json.loads(resp.read().decode("utf-8"))
                     text = extract_gemini_text(res)
                     if text:
+                        mask = current_key[:7] + "..." + current_key[-4:] if len(current_key) > 12 else "***"
+                        print(f"[Gemini OK] ✅ {model_name} ({mask})", flush=True)
                         return text
                     if res.get("promptFeedback", {}).get("blockReason") or (res.get("candidates") and res["candidates"][0].get("finishReason") == "SAFETY"):
                         print(f"[Gemini Audio Safety] ⚠️ {model_name} bloqueado por política de contenido en audio probe. Saltando...", flush=True)
