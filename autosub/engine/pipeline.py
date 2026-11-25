@@ -123,6 +123,34 @@ def _process_file_inner(video_path, force=False, context_only=False, target_lang
     if not os.path.isfile(video_path):
         return False
 
+    # Coordinación con AutoDub: esperar si AutoDub está muxando audio dual sobre este archivo
+    v_dir = os.path.dirname(video_path)
+    v_base = os.path.basename(video_path)
+    autodub_lock = os.path.join(v_dir, f".tmp_autodub_{v_base}.lock")
+    autodub_tmp = os.path.join(v_dir, f".tmp_autodub_{v_base}.tmp")
+    try:
+        sz_mb = os.path.getsize(video_path) / (1024 * 1024)
+        age_sec = time.time() - os.path.getmtime(video_path)
+        if sz_mb >= 350 and 0 <= age_sec < 6 and not os.path.exists(autodub_lock):
+            time.sleep(6 - age_sec)
+    except OSError:
+        pass
+
+    waited = 0
+    while (os.path.exists(autodub_lock) or os.path.exists(autodub_tmp)) and waited < 180:
+        if waited == 0:
+            print(f"[AutoSub] ⏳ AutoDub está sincronizando audio dual en '{v_base}'. Esperando archivo definitivo...", flush=True)
+            with processing_lock:
+                ctx.current_stage = "Esperando sincronización de AutoDub..."
+                ctx.current_stage_badge = "Esperando"
+        with cancel_lock:
+            if ctx.cancel_current_flag:
+                return False
+        time.sleep(2)
+        waited += 2
+    if not os.path.isfile(video_path):
+        return False
+
     base_dir = os.path.dirname(video_path)
     base_name = os.path.splitext(os.path.basename(video_path))[0]
     series_name = extract_series_name(video_path)

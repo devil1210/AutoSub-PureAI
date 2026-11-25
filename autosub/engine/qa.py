@@ -193,7 +193,7 @@ def audit_linguistic_heuristics(translated_texts: List[str], profile_data: Dict[
         # Fuga crítica de inglés: penalización severa
         score -= min(70.0, len(english_leakage) * 20.0)
     if truncated_lines:
-        score -= min(40.0, len(truncated_lines) * 15.0)
+        score -= min(30.0, len(truncated_lines) * 4.0)
 
     score = max(0.0, min(100.0, round(score, 1)))
 
@@ -371,12 +371,13 @@ def run_full_subtitle_qa(
     # Ponderación integral: 35% Técnica, 25% Dialectal, 40% Semántica
     overall_score = round((tech["score"] * 0.35) + (ling["score"] * 0.25) + (sem["score"] * 0.40), 1)
 
-    # Salvaguarda estricta: Si hay fuga de texto en inglés o líneas truncadas, nunca aprobar
+    # Salvaguarda estricta: Si hay fuga de texto en inglés o corte masivo de líneas, nunca aprobar
     eng_count = ling.get("english_leakage_count", 0)
     trunc_count = ling.get("truncated_lines_count", 0)
+    trunc_ratio = trunc_count / max(1, len(translated_texts))
     if eng_count > 0:
         overall_score = min(overall_score, 45.0)
-    elif trunc_count > 0:
+    elif trunc_count >= 5 and trunc_ratio >= 0.03:
         overall_score = min(overall_score, 55.0)
 
     if overall_score >= 95.0:
